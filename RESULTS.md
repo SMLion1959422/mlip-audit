@@ -7,10 +7,16 @@ GPU available this session); Colab GPU not used yet.
 acceptance criterion "MET" for MACE-OFF23-small.** That conclusion was
 premature -- it was built on energies from relaxed structures that turned
 out, on inspection, to have collapsed or dissociated O-H bonds (not an
-intact water dimer). Three requested diagnostic checks (geometry, LBFGS
-convergence, constraint-mechanism sensitivity) were run before writing this
-version; see "Diagnostic checks" below for the full trail. The corrected,
-current status is in Section 1.
+intact water dimer). Four diagnostic checks were run before writing this
+version: (1) geometry dump, (2) LBFGS convergence, (3) constraint-mechanism
+sensitivity, and (4) an unconstrained basin-of-attraction test -- see
+"Diagnostic checks" below for the full trail. The corrected, current status
+is in Section 1. Check 4 in particular directly tested (per an explicit
+request) whether the broken-geometry region is something an ordinary
+energy minimizer would actually wander into from a realistic clash, as
+opposed to only being reachable via the artificial restrained scan -- it
+is NOT reachable that way, for either model, which makes "NOT MET" a
+considerably stronger conclusion than it was before Check 4.
 
 ## 1. Acceptance criterion (as set for this session)
 
@@ -21,23 +27,36 @@ current status is in Section 1.
 > pipeline is wrong and we stop and debug rather than proceeding.
 
 **Status: NOT MET, under rigorous (geometry- and convergence-validated)
-analysis.** Across four independent methodological variants tried in this
-session (multi-start + restraint, single-chain + restraint, single-chain +
-hard constraint, all starting from independently-verified clean
-geometries), MACE-OFF23-small's energy rises smoothly and monotonically as
-O-O shrinks for as long as the relaxed structure remains a chemically
-intact water dimer. Below a threshold separation, EVERY relaxation
-attempt -- regardless of method -- converges to a structure with either a
-collapsed or a dissociated O-H bond. No run, under any method tried,
-produced a **geometry-valid** structure with energy below the physical
-~2.9 A minimum. This is stated per the session's own explicit instruction
-("if we cannot reproduce it... we stop and debug rather than proceeding")
--- this is that stop. See "What would still need to happen" at the end of
-this document for what remains untried.
+analysis -- and this is now more than an absence-of-evidence finding.**
+Across four independent methodological variants tried in this session
+(multi-start + restraint, single-chain + restraint, single-chain + hard
+constraint, and unconstrained free minimization -- see Check 4), all
+starting from independently-verified clean geometries, MACE-OFF23-small's
+energy rises smoothly and monotonically as O-O shrinks for as long as the
+relaxed structure remains a chemically intact water dimer. Below a
+threshold separation, restrained/constrained relaxation attempts converge
+to a structure with either a collapsed or a dissociated O-H bond -- BUT
+Check 4 (unconstrained LBFGS, no restraint, no constraint, starting from
+real mild-to-moderate clashes at O-O=1.8 and 2.2 A) shows that broken
+region is NOT spontaneously reachable: released from a clash and left to
+follow its own gradient, the model relaxes back to the physical
+hydrogen-bonded minimum every time, not into a collapsed structure. The
+broken-geometry states this session found are real stationary points of
+the model's PES, but they are NOT downhill from a physically reasonable
+starting point -- an actual docking or minimization workflow would not
+fall into them. No run, under any method tried, produced a
+**geometry-valid** structure with energy below the physical ~2.9 A
+minimum, AND the specific operational concern from the original spec
+("energy minimization of a clashed structure makes the clash worse") was
+directly tested and did not occur. This is stated per the session's own
+explicit instruction ("if we cannot reproduce it... we stop and debug
+rather than proceeding") -- this is that stop. See "What would still need
+to happen" at the end of this document for what remains untried.
 
 ANI-2x, run in parallel as a comparison point, shows the same qualitative
 picture (see Section 3): smooth monotonic rise while geometry-valid, then
-total breakdown of intact-dimer geometry below a threshold -- no
+total breakdown of intact-dimer geometry below a threshold, and (Check 4)
+the same non-reachability from a realistic clash -- no
 geometry-valid point deeper than physical.
 
 ## 2. Quantitative depth metric (replaces the old boolean)
@@ -141,6 +160,52 @@ the same validity gate. The hypothesis as stated is not what explains the
 discrepancy: the discrepancy dissolved once geometry validity was checked
 at all, for both models, under both methods.
 
+### Check 4: is the broken-geometry region reachable from a realistic clash?
+
+The previous three checks establish that the broken-geometry region is not
+a valid dimer state, but they don't by themselves address the concern the
+original spec actually raised: *"energy minimization of a clashed
+structure might lead to even stronger steric clashes."* A restrained SCAN
+artificially holds O-O at a target value throughout -- it doesn't test
+whether an ordinary, unconstrained minimizer would ever wander into the
+broken region on its own starting from something a real workflow (e.g. a
+docking program placing a ligand with a mild clash) might actually
+produce.
+
+Script: `scripts/check4_unconstrained_basin.py`. For each model, took the
+already-relaxed (geometry-valid) checkpoint structure at O-O target =
+2.9, 2.2, and 1.8 A, stripped every constraint and restraint, and ran
+**fully unconstrained** LBFGS (fmax=0.05, up to 500 steps) -- every degree
+of freedom free, including O-O itself. Full data:
+`results/test3_dimer/unconstrained_basin_check.csv`.
+
+| Model | Start target (A) | Start actual O-O (A) | Final O-O (A) | Final energy (eV) | Final geometry | Outcome |
+|---|---|---|---|---|---|---|
+| mace-off23-small | 2.9 | 2.900 | 2.900 | -4162.4494 | valid, min/max OH 0.958/0.966 | returned to physical minimum |
+| mace-off23-small | 2.2 | 2.202 | 2.756 | -4162.4005 | valid, min/max OH 0.958/0.962 | returned to physical minimum |
+| mace-off23-small | 1.8 | 1.808 | 2.733 | -4162.4018 | valid, min/max OH 0.958/0.962 | returned to physical minimum |
+| ani2x | 2.9 | 2.900 | 2.844 | -4157.6147 | valid, min/max OH 0.963/0.972 | returned to physical minimum |
+| ani2x | 2.2 | 2.202 | 2.639 | -4157.5469 | valid, min/max OH 0.962/0.967 | returned to physical minimum |
+| ani2x | 1.8 | 1.808 | 2.635 | -4157.5459 | valid, min/max OH 0.963/0.967 | returned to physical minimum |
+
+**All six runs (both models, all three starting points, including the
+real O-O=1.8 A steric clash) relaxed back to the physical hydrogen-bonded
+minimum.** None collapsed; every final structure has zero
+proton-transfer flags and normal O-H bond lengths. The broken-geometry
+region documented in Checks 1-3 is a real feature of both models' PES
+(reachable by an artificial restrained scan that forces the system to
+stay at an extreme O-O value against its own gradient), but it is **not
+downhill from a physically reasonable starting geometry** -- an actual
+energy-minimization or docking workflow encountering a mild-to-moderate
+clash would not fall into it for either model. This directly answers the
+question the acceptance criterion is really asking about operational
+risk, and the answer is negative for both models under this test.
+
+This does not prove the broken region is unreachable from EVERY possible
+starting point (only the three tested, which were chosen to bracket
+"mild" to "fairly severe" steric clash) -- see "What would still need to
+happen" for how this could be pushed further.
+
 ## 4. Pipeline changes made in response to this diagnostic
 
 - `mlip_audit/geometry.py`: added `check_dimer_geometry()` /
@@ -223,28 +288,48 @@ this Windows machine, torch installed from the CPU-only wheel index
 
 ## What would still need to happen to give this a final verdict
 
-The acceptance criterion is NOT confirmed, but it is also not cleanly
-falsified -- "we could not find a valid example with the methods we tried"
-is not the same as "no valid example exists." Concretely untried:
-1. **The literal starting geometry.** Ranasinghe et al. start from "the
-   Smith stationary point 1," then a real wB97X/6-31G(d) optimization.
-   This session used a hand-built idealized Cs-symmetric guess instead
-   (`geometry.build_water_dimer`), reasoning that the optimizer should
-   wash out the difference -- but the whole finding of this diagnostic
-   round is that the short-range landscape is rugged/history-dependent
-   enough for the exact path to matter a great deal. Building the actual
-   literature starting geometry (or at least a DFT-optimized one) and
-   re-running is the single most direct way to close this gap.
+Check 4 upgrades the conclusion from "we could not find a valid example"
+to "we could not find a valid example, AND we specifically tested whether
+an ordinary minimizer would fall into the broken region from a realistic
+clash and it did not" -- a real, operationally-scoped negative result, not
+just absence of evidence. It does not, however, prove the broken region is
+unreachable from literally any starting point, and the earlier open
+questions about matching the paper's exact setup are still open.
+Concretely untried, in updated priority order given Check 4:
+1. **The paper's own geometries** (was #3, now most valuable given Check
+   4). Unavailable to this session. If Ranasinghe et al.'s SI includes
+   structures (not just energies) for their MACE-OFF23 "spurious minima,"
+   checking those against the same `check_dimer_geometry` gate used here
+   -- and, if reachable, checking whether THEIR reported minimum is
+   downhill-reachable the way Check 4 tests -- would directly settle
+   whether their finding and this session's non-finding are actually in
+   tension, or whether the published minimum is itself in the
+   not-operationally-reachable category this session identified.
 2. **Finer sampling right at the breakdown boundary.** This scan steps in
    0.1 A increments (matching the paper's stated 0.01 nm). A valid,
    deeper minimum occupying a window narrower than 0.1 A between two
    sampled points would be invisible here. Given how sharply behavior
    changed between adjacent 0.1 A points in this data, this is plausible.
-3. **The paper's own geometries.** Unavailable to this session. If
-   Ranasinghe et al.'s SI includes structures (not just energies) for
-   their MACE-OFF23 "spurious minima," checking those against the same
-   `check_dimer_geometry` gate used here would directly settle whether
-   their own published finding involves an intact dimer or not -- which
-   would also settle whether this session's inability to reproduce it
-   reflects a real difference in conclusion, or just a difference in how
-   carefully the geometry was checked.
+   Somewhat de-prioritized by Check 4: even if such a narrow valid basin
+   exists, Check 4 suggests it would need its OWN separate basin of
+   attraction reachable from a realistic clash to be operationally
+   relevant, and the tested clashes (1.8, 2.2 A) didn't find one.
+3. **The literal starting geometry.** Ranasinghe et al. start from "the
+   Smith stationary point 1," then a real wB97X/6-31G(d) optimization,
+   vs. this session's hand-built idealized Cs-symmetric guess
+   (`geometry.build_water_dimer`). De-prioritized by Check 4: the
+   unconstrained basin test used THREE different starting geometries
+   (2.9, 2.2, 1.8 A, all independently arrived at via the restrained
+   scan's own optimization history) and got the same outcome every time,
+   which is some evidence the specific starting-geometry choice is not
+   the dominant variable -- though it does not rule out that the ONE
+   specific literature geometry behaves differently.
+4. **More/different unconstrained starting points than Check 4 tried.**
+   Only 1.8, 2.2, and 2.9 A were tested (as requested). Trying additional
+   starting points -- especially ones deliberately constructed to be
+   "close to" the broken region found in Checks 1-3 (e.g. take an
+   invalid, dissociated structure from the restrained scan and release
+   the restraint from THERE, rather than from a valid structure) would
+   more directly test the boundary of the broken region's basin of
+   attraction, rather than only testing "is it reachable from a normal
+   structure."

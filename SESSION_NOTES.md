@@ -10,16 +10,23 @@ something changes.
 - Repo scaffold, model-loading harness (`mlip_audit/models.py`), and
   Test 3 (`mlip_audit/test3_dimer.py`) are built and working.
 - MACE-OFF23-small's and ANI-2x's Test 3 scans are DONE, and both went
-  through a rigorous geometry-validity + convergence diagnostic (three
+  through a rigorous geometry-validity + convergence diagnostic (FOUR
   checks: geometry dump, force-convergence, constraint-mechanism
-  sensitivity) requested mid-session. **The acceptance criterion (a valid,
-  geometry-intact spurious minimum deeper than physical) is currently NOT
-  MET for either model** -- see `RESULTS.md` Section 1. An EARLIER version
-  of `RESULTS.md` claimed it WAS met for MACE-OFF23-small; that was wrong
-  and has been explicitly retracted in the current version. If you find
-  any other document, comment, or cached belief claiming "MACE acceptance
-  criterion MET," it is stale -- `RESULTS.md`'s current text is the
-  source of truth.
+  sensitivity, and an unconstrained basin-of-attraction test) requested
+  mid-session in two rounds. **The acceptance criterion (a valid,
+  geometry-intact, operationally-reachable spurious minimum deeper than
+  physical) is currently NOT MET for either model** -- see `RESULTS.md`
+  Section 1. This is now backed by a real negative result, not just
+  absence of evidence: Check 4 released both models from real steric
+  clashes (O-O = 1.8, 2.2 A) with NO restraint/constraint at all, and
+  every single run (6/6) relaxed back to the physical minimum rather than
+  collapsing -- i.e. a real minimization/docking workflow would not
+  actually fall into the broken-geometry region either model shows under
+  the artificial restrained scan. An EARLIER version of `RESULTS.md`
+  claimed the criterion WAS met for MACE-OFF23-small; that was wrong and
+  has been explicitly retracted. If you find any other document, comment,
+  or cached belief claiming "MACE acceptance criterion MET," it is stale
+  -- `RESULTS.md`'s current text is the source of truth.
 - UMA-S: environment is ready (`.venv-uma`, see below) but NOTHING has
   been run yet -- no charge/spin test, no Test 3 scan. This is the most
   concrete unstarted piece of work, AND it must go through the same
@@ -81,17 +88,23 @@ or free-threaded build; Python 3.11.9 at that path is known-good. See
    raw-vs-valid depth numbers before writing anything about UMA-S's
    result. Record it in `RESULTS.md` as a new section, whatever it shows.
 
-3. **Close the three open gaps listed in `RESULTS.md`'s "What would still
-   need to happen" section** -- in priority order, these are: (a) build
-   the actual literature starting geometry ("Smith stationary point 1"
-   from Ranasinghe et al., not the hand-built idealized guess this session
-   used) and re-run, since the diagnostic work showed the short-range
-   landscape is history-dependent enough that this could matter a lot;
-   (b) finer-than-0.1-A sampling right at the boundary where geometry
-   validity breaks down, in case a valid deeper minimum lives in a window
-   narrower than the current grid; (c) if at all obtainable, the paper's
-   own SI structures, to check whether their published spurious minimum
-   is itself geometry-valid by the same check used here.
+3. **Close the open gaps listed in `RESULTS.md`'s "What would still need
+   to happen" section** -- re-prioritized after Check 4 (the unconstrained
+   basin-of-attraction test), in order: (a) the paper's own SI structures,
+   if obtainable, to check whether THEIR published spurious minimum is
+   itself geometry-valid and operationally reachable by the same checks
+   used here -- now the highest-value gap, since Check 4 found a real
+   negative result rather than just absence of evidence; (b)
+   finer-than-0.1-A sampling right at the breakdown boundary, somewhat
+   de-prioritized since Check 4 suggests even a narrow valid basin there
+   would need its own reachable basin of attraction to matter
+   operationally; (c) the literal literature starting geometry ("Smith
+   stationary point 1"), de-prioritized since Check 4 got the same
+   "returns to physical minimum" outcome from three different starting
+   geometries; (d) NEW -- more/different unconstrained starting points
+   for Check 4 itself, especially releasing the restraint from an already
+   INVALID (dissociated) structure rather than only from valid ones, to
+   more directly probe the broken region's basin of attraction boundary.
 
 4. **Tests 1, 2, 4** -- out of scope for this session by explicit
    instruction; don't start these without being asked.
