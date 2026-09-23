@@ -1,0 +1,18 @@
+# Stack for UMA-S.
+#
+# NOTE: torch itself is deliberately NOT pinned here -- see
+# requirements-ani-mace.txt for why.
+
+# Core
+ase>=3.23
+numpy
+pandas
+matplotlib
+
+# Model
+fairchem-core>=2.1.0    # UMA-S (pretrained_mlip, FAIRChemCalculator); requires e3nn>=0.5
+huggingface_hub>=0.24   # UMA checkpoint download/auth (uses your cached `hf auth login` token)
+
+# Testing / notebook driver
+pytest
+jupyter

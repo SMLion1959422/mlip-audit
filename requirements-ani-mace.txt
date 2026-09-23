@@ -1,0 +1,21 @@
+# Stack for ANI-2x + MACE-OFF23-small.
+#
+# NOTE: torch itself is deliberately NOT pinned here. On Colab, torch is
+# already preinstalled with a CUDA build matched to the runtime -- pip
+# installing a generic torch wheel on top of it risks breaking CUDA. Local
+# CPU-only dev machines should install torch separately first (see
+# setup.sh / README), matched to their platform.
+
+# Core
+ase>=3.23
+numpy
+pandas
+matplotlib
+
+# Models
+torchani>=2.2          # ANI-2x
+mace-torch>=0.3.6       # MACE-OFF23-small (hard-pins e3nn==0.4.4 -- see requirements-uma.txt)
+
+# Testing / notebook driver
+pytest
+jupyter

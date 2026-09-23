@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mlip-audit"
+version = "0.1.0"
+description = "Physical-reliability audit harness for OMol25-generation MLIPs (ANI-2x, MACE-OFF23, UMA-S)."
+requires-python = ">=3.10"
+
+[tool.setuptools]
+packages = ["mlip_audit"]

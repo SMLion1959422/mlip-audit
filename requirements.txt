@@ -1,0 +1,16 @@
+# mace-torch (even its latest release, 0.3.10) hard-pins e3nn==0.4.4.
+# fairchem-core (required for UMA-S) requires e3nn>=0.5. These pins
+# genuinely conflict -- `pip install` of both together is
+# ResolutionImpossible, not just slow to resolve. This is not a version
+# range we happened to pick; it holds across all current releases of both
+# packages (checked 2026-09-22).
+#
+# Consequence: ANI-2x + MACE-OFF23-small live in one environment, UMA-S
+# lives in another. Use ONE of the two files below, not this one directly:
+#
+#   pip install -r requirements-ani-mace.txt   # ani2x, mace-off23-small
+#   pip install -r requirements-uma.txt        # uma-s-1p1
+#
+# setup.sh does this for you: `bash setup.sh ani-mace` or `bash setup.sh uma`.
+# On Colab this means running Test 3 for UMA-S in a separate runtime/session
+# from ANI-2x and MACE-OFF23-small (see README.md).

@@ -1,0 +1,37 @@
+# Secrets / credentials -- never commit these
+.env
+.env.*
+*token*
+huggingface_token*
+.hf_token
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.venv-*/
+venv/
+env/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Result CSVs/plots ARE committed (small, and they're the audit's actual
+# evidence -- see RESULTS.md). Only checkpoint trajectories (regenerable by
+# re-running, and not needed to interpret results) and generic caches are
+# excluded.
+results/checkpoints/
+data/
+.cache/
+*.pt
+*.ckpt
+*.model
+
+# OS
+.DS_Store
+Thumbs.db
