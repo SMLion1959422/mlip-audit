@@ -9,18 +9,22 @@ something changes.
 
 - Repo scaffold, model-loading harness (`mlip_audit/models.py`), and
   Test 3 (`mlip_audit/test3_dimer.py`) are built and working.
-- MACE-OFF23-small's Test 3 scan is DONE and the acceptance criterion
-  (spurious minimum deeper than physical) is MET -- see `RESULTS.md`
-  section 2. Don't re-derive this; it's settled.
-- ANI-2x's Test 3 scan is DONE but its result is FLAGGED, not settled --
-  see `RESULTS.md` section 3. It shows the same qualitative
-  "spurious-minimum" flag as MACE-OFF23, which contradicts the paper's
-  description of ANI-2x as well-behaved. **If you pick this back up, this
-  is probably the single highest-value thing to resolve** -- see "Next
-  step: investigate the ANI-2x result" below.
+- MACE-OFF23-small's and ANI-2x's Test 3 scans are DONE, and both went
+  through a rigorous geometry-validity + convergence diagnostic (three
+  checks: geometry dump, force-convergence, constraint-mechanism
+  sensitivity) requested mid-session. **The acceptance criterion (a valid,
+  geometry-intact spurious minimum deeper than physical) is currently NOT
+  MET for either model** -- see `RESULTS.md` Section 1. An EARLIER version
+  of `RESULTS.md` claimed it WAS met for MACE-OFF23-small; that was wrong
+  and has been explicitly retracted in the current version. If you find
+  any other document, comment, or cached belief claiming "MACE acceptance
+  criterion MET," it is stale -- `RESULTS.md`'s current text is the
+  source of truth.
 - UMA-S: environment is ready (`.venv-uma`, see below) but NOTHING has
   been run yet -- no charge/spin test, no Test 3 scan. This is the most
-  concrete unstarted piece of work.
+  concrete unstarted piece of work, AND it must go through the same
+  geometry/convergence gating from the start (don't repeat the mistake of
+  reading off a raw minimum) -- see "Immediate next steps" below.
 
 ## Two environments -- do not `pip install` both stacks into one venv
 
@@ -48,7 +52,7 @@ python -m venv .venv-uma      && source .venv-uma/Scripts/activate  && bash setu
 `/c/Users/srika/AppData/Local/Programs/Python/Python311/python.exe -m venv ...`
 specifically -- the default `python`/`py` on PATH may resolve to a broken
 or free-threaded build; Python 3.11.9 at that path is known-good. See
-`RESULTS.md` section 4 for exactly what versions ended up installed.)
+`RESULTS.md` Section 5 for exactly what versions ended up installed.)
 
 ## Immediate next steps, in priority order
 
@@ -57,47 +61,37 @@ or free-threaded build; Python 3.11.9 at that path is known-good. See
    cd /c/Users/srika/Documents/mlip-audit && source .venv-uma/Scripts/activate
    python -m pytest tests/test_charge_spin.py -v
    ```
-   A cached HuggingFace token already exists on this machine
-   (`huggingface_hub.get_token()` found one during this session) -- if
-   this session's login has expired or you're on a different machine, run
+   A cached HuggingFace token already exists on this machine -- if this
+   session's login has expired or you're on a different machine, run
    `hf auth login` first and make sure the gated UMA model license has
    been accepted on huggingface.co for that account. If
-   `test_charge_reaches_model` fails (not skips) -- i.e. it loads UMA but
-   the two charge states give near-identical energies -- STOP and debug
-   the `FAIRChemCalculator`/`atoms.info` wiring in `mlip_audit/models.py`
-   before trusting anything else UMA-related; that was called out as
-   critical in the original project brief.
+   `test_charge_reaches_model` fails (not skips) STOP and debug the
+   `FAIRChemCalculator`/`atoms.info` wiring in `mlip_audit/models.py`
+   before trusting anything else UMA-related.
 
-2. **Run UMA-S's Test 3 scan** (same command pattern as the other two):
+2. **Run UMA-S's Test 3 scan**, then its plot/analysis:
    ```bash
    python -m mlip_audit.test3_dimer --model uma-s-1p1 --device cpu --no-resume --verbose
-   ```
-   UMA-S is heavier than ANI-2x/MACE-OFF23-small; on CPU this may be slow
-   -- consider `--device cuda` on Colab, or reducing `--n-restarts` (default
-   5) for a faster first pass if it's impractically slow on CPU. Then:
-   ```bash
    python -m mlip_audit.plotting --csv results/test3_dimer/*.csv
    ```
-   to get the combined plot and per-model spurious-minimum check. Record
-   the result in `RESULTS.md` the same way MACE-OFF23/ANI-2x are recorded
-   (a new numbered section), whatever it shows -- don't just fold it in
-   silently.
+   The pipeline already includes geometry-validity gating and correct
+   live convergence capture (both were bugs fixed THIS session -- see
+   `RESULTS.md` Section 4), so UMA-S's numbers should come out trustworthy
+   without extra work. Still: look at the `geometry_valid` column and the
+   raw-vs-valid depth numbers before writing anything about UMA-S's
+   result. Record it in `RESULTS.md` as a new section, whatever it shows.
 
-3. **Investigate the ANI-2x result** (`RESULTS.md` section 3). Concretely:
-   - Re-run ANI-2x's short-range points (say 0.2-1.0 A) with
-     `--n-restarts 1` (i.e. warm-start only, no random reorientation) and
-     see if the deep minimum still appears. If it disappears, the
-     multi-start mechanism itself is implicated (or at least, is required
-     to reproduce it -- doesn't necessarily mean it's wrong, but narrows
-     the question).
-   - Look at the actual relaxed geometry at ANI-2x's 0.6 A point (it's in
-     `results/checkpoints/ani2x_dimer_scan.extxyz` locally -- NOT committed,
-     regenerate by re-running if needed) and sanity-check it's a real
-     structure (no NaN positions, no atoms on top of each other in a way
-     that's clearly a numerical degenerate case) rather than an artifact
-     of the perturbed-restart geometry construction.
-   - Consider whether `torchani`'s ASE calculator handles extreme
-     close-contact geometries reliably at all, independent of this test.
+3. **Close the three open gaps listed in `RESULTS.md`'s "What would still
+   need to happen" section** -- in priority order, these are: (a) build
+   the actual literature starting geometry ("Smith stationary point 1"
+   from Ranasinghe et al., not the hand-built idealized guess this session
+   used) and re-run, since the diagnostic work showed the short-range
+   landscape is history-dependent enough that this could matter a lot;
+   (b) finer-than-0.1-A sampling right at the boundary where geometry
+   validity breaks down, in case a valid deeper minimum lives in a window
+   narrower than the current grid; (c) if at all obtainable, the paper's
+   own SI structures, to check whether their published spurious minimum
+   is itself geometry-valid by the same check used here.
 
 4. **Tests 1, 2, 4** -- out of scope for this session by explicit
    instruction; don't start these without being asked.
@@ -111,22 +105,35 @@ or free-threaded build; Python 3.11.9 at that path is known-good. See
 - Don't be surprised that `test3_dimer.py` uses a harmonic RESTRAINT
   (`mlip_audit/restraints.py`) instead of `ase.constraints.FixBondLength`
   as the original project brief literally specified -- this was a
-  deliberate, debugged, and disclosed deviation. See `RESULTS.md`
-  "Debugging trail" and the module docstring in `test3_dimer.py` before
-  "fixing" it back.
+  deliberate, debugged, and disclosed deviation. See `RESULTS.md` and the
+  module docstring in `test3_dimer.py` before "fixing" it back. A hard
+  constraint was re-tested later in the session anyway (Check 3) and
+  didn't change the bottom-line conclusion.
 - Don't be surprised by the multi-start restarts
-  (`DIMER_N_RESTARTS=5` in `mlip_audit/config.py`) -- also deliberate, also
-  in the debugging trail. A single LBFGS chain was empirically shown to
-  produce false negatives on this specific landscape.
+  (`DIMER_N_RESTARTS=5` in `mlip_audit/config.py`) -- also deliberate.
+  A single LBFGS chain was empirically shown to be sensitive to which
+  basin it lands in on this landscape.
+- **Do not report a "spurious minimum" number without checking
+  `geometry_valid` first.** This is the single biggest lesson of this
+  session. `mlip_audit.geometry.check_dimer_geometry` is the canonical
+  check (catches both collapsed AND dissociated O-H -- an earlier,
+  narrower version of this check that only caught collapse was itself a
+  bug found mid-session). `mlip_audit.plotting.check_spurious_minimum`
+  reports BOTH a "raw" and a "valid" depth for exactly this reason --
+  always prefer "valid," and treat a large raw/valid gap as a red flag
+  about the raw number, not as extra evidence.
 - The `oo_distance_actual_ang` CSV column can differ meaningfully from
   `oo_distance_target_ang` at short range (the restraint is soft, not a
-  hard constraint) -- this is expected and itself diagnostic, not a bug.
-  See the -8792 eV point's caveat in `RESULTS.md` section 2 for a concrete
-  example of why this matters when citing a specific number.
+  hard constraint) -- expected and itself diagnostic, not a bug.
+- If you see a point marked `converged=True` that looks physically
+  implausible, don't assume the label is right -- re-derive `final_max_force_eV_per_ang`
+  yourself and check it's actually <=0.05. This exact class of bug (a
+  point silently mislabeled converged) was found and fixed this session;
+  the fix (`_relax_candidate` in `test3_dimer.py`) is believed correct,
+  but treat any single surprising point with residual suspicion.
 - `mlip_audit/plotting.py::check_spurious_minimum` compares the
   whole-curve global minimum against a minimum computed over a NARROW
   2.5-3.5 A window (`PHYSICAL_WINDOW_ANG`), not "everything >= 1.0 A" --
-  this was a real bug that was fixed mid-session (see `RESULTS.md`
-  Debugging trail, last paragraph). If you see `physical_min_distance`
-  landing outside ~2.7-3.1 A for some model, something is wrong -- don't
-  just trust the number.
+  a wider window double-counts already-anomalous points as "physical."
+  If you see `physical_min_distance` landing outside ~2.7-3.1 A for some
+  model, something is wrong -- don't just trust the number.

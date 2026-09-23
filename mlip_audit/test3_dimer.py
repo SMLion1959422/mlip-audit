@@ -113,6 +113,7 @@ from mlip_audit.geometry import (
     O_INDEX_A,
     O_INDEX_B,
     build_water_dimer,
+    check_dimer_geometry,
     get_oo_distance,
     random_perturbed_water_dimer,
     set_oo_distance,
@@ -127,11 +128,16 @@ CSV_FIELDS = [
     "oo_distance_actual_ang",
     "energy_eV",
     "converged",
+    "final_max_force_eV_per_ang",
     "n_lbfgs_steps",
     "wall_time_s",
     "status",
     "winning_start",
     "n_converged_of_n_restarts",
+    "min_oh_ang",
+    "max_oh_ang",
+    "n_proton_transfer_flags",
+    "geometry_valid",
 ]
 
 
@@ -205,10 +211,20 @@ def _relax_candidate(
     spin: int,
     fmax: float,
     max_steps: int,
-) -> tuple[float, bool, int, Atoms]:
+) -> tuple[float, bool, int, float, Atoms]:
     """Restrained-relax one candidate starting geometry (mutated in place).
 
-    Returns (model_only_energy_eV, converged, n_lbfgs_steps, atoms).
+    Returns (model_only_energy_eV, converged, n_lbfgs_steps,
+    final_max_force_eV_per_ang, atoms).
+
+    final_max_force is read from the RESTRAINED system immediately after
+    opt.run() returns, before switching to the model-only calculator --
+    recomputing it later, after reloading/re-attaching calculators, was
+    empirically found (during this project's ANI-2x/MACE diagnostic) to
+    sometimes disagree with what LBFGS actually converged against on a
+    rugged part of the PES, which had silently mislabeled at least one
+    MACE-OFF23-small point as converged when it was not. Reading it here,
+    in-place, avoids that class of bug by construction.
     """
     prepare_atoms_for_model(atoms, model, charge=charge, spin=spin)
     restraint = HarmonicDistanceRestraint(O_INDEX_A, O_INDEX_B, RESTRAINT_K_EV_PER_ANG2, target)
@@ -216,13 +232,14 @@ def _relax_candidate(
 
     opt = LBFGS(atoms, logfile=None)
     converged = opt.run(fmax=fmax, steps=max_steps)
+    final_max_force = float(np.abs(atoms.get_forces()).max())
 
     # Report the MODEL's own energy at the restrained-converged geometry
     # (excludes the restraint bias term), matching what Ranasinghe et al.
     # plot as the potential energy curve.
     atoms.calc = calc
     energy_eV = float(atoms.get_potential_energy())
-    return energy_eV, converged, opt.nsteps, atoms
+    return energy_eV, converged, opt.nsteps, final_max_force, atoms
 
 
 def run_scan(
@@ -290,23 +307,34 @@ def run_scan(
                     (f"restart_{i}", random_perturbed_water_dimer(target, rng))
                 )
 
-            best = None  # (energy, converged, n_steps, atoms, label)
+            best = None  # (energy, converged, n_steps, max_force, atoms, label, geom_report)
             n_converged = 0
             for label, cand_atoms in candidates:
-                e, conv, n_steps, relaxed = _relax_candidate(
+                e, conv, n_steps, max_force, relaxed = _relax_candidate(
                     cand_atoms, calc, model, target, charge, spin, fmax, max_steps
                 )
+                geom = check_dimer_geometry(relaxed)
                 n_converged += int(conv)
                 if best is None:
-                    best = (e, conv, n_steps, relaxed, label)
+                    best = (e, conv, n_steps, max_force, relaxed, label, geom)
                 else:
-                    best_conv = best[1]
-                    # Converged candidates always beat non-converged ones;
-                    # within the same convergence status, lower energy wins.
-                    if (conv and not best_conv) or (conv == best_conv and e < best[0]):
-                        best = (e, conv, n_steps, relaxed, label)
+                    _, best_conv, _, _, _, _, best_geom = best
+                    # Selection priority: (1) converged beats non-converged,
+                    # (2) geometry-VALID beats invalid (an invalid-geometry
+                    # candidate's energy is not a meaningful "dimer energy"
+                    # and must not be allowed to win on energy alone --
+                    # see RESULTS.md's diagnostic trail for why this matters),
+                    # (3) only then, lower energy wins.
+                    if conv != best_conv:
+                        better = conv and not best_conv
+                    elif geom.is_valid != best_geom.is_valid:
+                        better = geom.is_valid and not best_geom.is_valid
+                    else:
+                        better = e < best[0]
+                    if better:
+                        best = (e, conv, n_steps, max_force, relaxed, label, geom)
 
-            energy_eV, converged, n_steps, atoms, winning_start = best
+            energy_eV, converged, n_steps, final_max_force, atoms, winning_start, geom_report = best
             actual_distance = get_oo_distance(atoms)
             status = "ok"
         except Exception as exc:
@@ -315,9 +343,11 @@ def run_scan(
             actual_distance = float("nan")
             converged = False
             n_steps = -1
+            final_max_force = float("nan")
             status = "error"
             winning_start = ""
             n_converged = 0
+            geom_report = None
             failure = exc
 
         wall_time_s = time.time() - t0
@@ -326,11 +356,16 @@ def run_scan(
             "oo_distance_actual_ang": actual_distance,
             "energy_eV": energy_eV,
             "converged": converged,
+            "final_max_force_eV_per_ang": round(final_max_force, 6) if final_max_force == final_max_force else final_max_force,
             "n_lbfgs_steps": n_steps,
             "wall_time_s": round(wall_time_s, 3),
             "status": status,
             "winning_start": winning_start,
             "n_converged_of_n_restarts": f"{n_converged}/{n_restarts}",
+            "min_oh_ang": round(geom_report.min_oh_ang, 4) if geom_report else float("nan"),
+            "max_oh_ang": round(geom_report.max_oh_ang, 4) if geom_report else float("nan"),
+            "n_proton_transfer_flags": geom_report.n_proton_transfer_flags if geom_report else -1,
+            "geometry_valid": geom_report.is_valid if geom_report else False,
         }
         _append_csv_row(csv_path, row)
 

@@ -139,16 +139,32 @@ downstream.
 python -m mlip_audit.plotting --csv results/test3_dimer/*.csv
 ```
 
-Saves a log-scale (symlog) energy-vs-distance plot to
-`results/test3_dimer/dimer_scan.png` and prints, per model, whether a
-spurious short-range (< 1.0 A) minimum was found that is deeper than the
-physical minimum (expected near 2.9 A).
+Saves two plots -- `results/test3_dimer/dimer_scan.png` (log-scale
+energy vs. distance) and `results/test3_dimer/force_convergence.png`
+(LBFGS convergence) -- and prints, per model, a **quantitative** depth
+metric (eV and kcal/mol) for how much deeper the global minimum is than
+the physical ~2.9 A one.
+
+**Read this before trusting any depth number**: a deep energy at short
+O-O distance only means something if the underlying relaxed structure is
+still a chemically intact water dimer. This project's own diagnostic work
+found that a naive "just take the minimum energy" reading gets fooled by
+relaxations that collapse or dissociate an O-H bond -- so every depth is
+reported TWO ways, "raw" (unfiltered) and "valid" (restricted to
+`converged=True AND geometry_valid=True` points, per
+`mlip_audit.geometry.check_dimer_geometry`). **Always check both, and
+prefer the "valid" number.** See `RESULTS.md` for this session's actual
+numbers and the full diagnostic trail -- the acceptance criterion below
+was NOT met once this filtering was applied, which is a real, current
+finding, not a placeholder.
 
 **Acceptance criterion for this session:** `mace-off23-small` must show
 exactly this failure -- a spurious minimum at short O-O separation deeper
-than the physical one near 2.9 A. This is a known, published result. If our
-pipeline does not reproduce it, that is treated as a bug in the pipeline to
-be debugged, not a finding to report.
+than the physical one near 2.9 A, in a structure that is still a genuine
+water dimer. This is a known, published result. If our pipeline does not
+reproduce it, that is treated as a bug (in the pipeline, the methodology,
+or our understanding) to be debugged, not a finding to report at face
+value -- see `RESULTS.md` for where that debugging currently stands.
 
 ## Charge/spin sanity check (UMA)
 

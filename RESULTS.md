@@ -3,6 +3,15 @@
 Session date: 2026-09-22/23. Scan performed on CPU (local dev machine, no
 GPU available this session); Colab GPU not used yet.
 
+**This document supersedes an earlier version of itself that declared the
+acceptance criterion "MET" for MACE-OFF23-small.** That conclusion was
+premature -- it was built on energies from relaxed structures that turned
+out, on inspection, to have collapsed or dissociated O-H bonds (not an
+intact water dimer). Three requested diagnostic checks (geometry, LBFGS
+convergence, constraint-mechanism sensitivity) were run before writing this
+version; see "Diagnostic checks" below for the full trail. The corrected,
+current status is in Section 1.
+
 ## 1. Acceptance criterion (as set for this session)
 
 > MACE-OFF23-small must reproduce its published failure: a spurious energy
@@ -11,93 +20,161 @@ GPU available this session); Colab GPU not used yet.
 > JCIM 65(17), 8980-8999; arXiv:2503.11537). If we cannot reproduce it, the
 > pipeline is wrong and we stop and debug rather than proceeding.
 
-**Status: MET**, after two rounds of debugging (see "Debugging trail"
-below) that changed the implementation from what the original spec
-literally described. Both changes are disclosed in code (module
-docstrings in `mlip_audit/test3_dimer.py` and `mlip_audit/restraints.py`)
-and here.
+**Status: NOT MET, under rigorous (geometry- and convergence-validated)
+analysis.** Across four independent methodological variants tried in this
+session (multi-start + restraint, single-chain + restraint, single-chain +
+hard constraint, all starting from independently-verified clean
+geometries), MACE-OFF23-small's energy rises smoothly and monotonically as
+O-O shrinks for as long as the relaxed structure remains a chemically
+intact water dimer. Below a threshold separation, EVERY relaxation
+attempt -- regardless of method -- converges to a structure with either a
+collapsed or a dissociated O-H bond. No run, under any method tried,
+produced a **geometry-valid** structure with energy below the physical
+~2.9 A minimum. This is stated per the session's own explicit instruction
+("if we cannot reproduce it... we stop and debug rather than proceeding")
+-- this is that stop. See "What would still need to happen" at the end of
+this document for what remains untried.
 
-## 2. MACE-OFF23-small result
+ANI-2x, run in parallel as a comparison point, shows the same qualitative
+picture (see Section 3): smooth monotonic rise while geometry-valid, then
+total breakdown of intact-dimer geometry below a threshold -- no
+geometry-valid point deeper than physical.
 
-| | O-O distance (target) | O-O distance (actual) | Energy |
-|---|---|---|---|
-| Physical minimum (reference window 2.5-3.5 A) | 2.9 A | 2.900 A | **-4162.4495 eV** |
-| Global minimum (entire 0.2-7.0 A scan) | 0.7 A | 1.034 A | **-8792.0724 eV** |
+## 2. Quantitative depth metric (replaces the old boolean)
 
-The global minimum is **4629.6 eV lower** than the physical minimum --
-clearly and unambiguously deeper, not a marginal effect. It is also not an
-isolated fluke: several other short-range points independently converged
-below the physical-minimum energy:
+For both models, `mlip_audit.plotting.check_spurious_minimum` now reports
+depth in eV and kcal/mol two ways:
+- **raw**: minimum energy over ALL scanned points, no filtering (this is
+  what a naive "just read off the minimum" analysis would report, and is
+  probably close to what the original session's premature "MET" claim was
+  built on).
+- **valid**: minimum energy restricted to points that are BOTH
+  `converged=True` AND `geometry_valid=True` (no collapsed or dissociated
+  O-H -- see `mlip_audit.geometry.check_dimer_geometry`).
 
-| Target O-O (A) | Actual O-O (A) | Energy (eV) | Deeper than physical (-4162.45 eV)? |
-|---|---|---|---|
-| 1.0 | 0.996 | -4166.97 | yes |
-| 0.8 | 0.739 | -4164.86 | yes |
-| 0.7 | 1.034 | -8792.07 | yes (extreme outlier) |
-| 0.6 | 0.680 | -4165.80 | yes |
+| Model | Physical min (2.9ish A) | RAW global min | RAW depth | VALID global min | VALID depth |
+|---|---|---|---|---|---|
+| mace-off23-small | -4162.4494 eV @ 2.9 A | -4165.8032 eV @ 0.6 A | 3.35 eV = **77.3 kcal/mol** | -4162.4494 eV @ 2.9 A (i.e. no deeper valid point) | **0.00 eV = 0.00 kcal/mol** |
+| ani2x | -4157.6191 eV @ 2.7 A | -4258.9194 eV @ 0.6 A | 101.30 eV = **2336.0 kcal/mol** | -4157.6191 eV @ 2.7 A (i.e. no deeper valid point) | **0.00 eV = 0.00 kcal/mol** |
 
-Full data: `results/test3_dimer/mace-off23-small.csv` (69 points, all
-`status=ok`, all `converged=True` except the 0.5 A point). Plot:
-`results/test3_dimer/dimer_scan.png`.
+These are NOT the same finding, as requested -- and now that both are
+computed the same rigorous way, neither is actually a confirmed spurious
+minimum. The RAW numbers are large and clearly different in magnitude
+between the two models (77 vs. 2336 kcal/mol), but both RAW numbers come
+from geometry-invalid points, so neither should be cited as "the depth of
+the spurious minimum" without the caveat that it is not evidence about the
+intact-dimer PES.
 
-Shape of the curve (see plot): smooth single well with minimum at 2.9 A,
-steep physically-correct repulsive rise from ~2.5 A down to ~1.1 A, then a
-catastrophic drop into unphysical territory below ~1.0 A -- qualitatively
-exactly the failure Ranasinghe et al. describe and plot for MACE-OFF23
-models.
+64/69 points are `geometry_valid=True` for BOTH models (see per-point data
+in `results/test3_dimer/{model}.csv`, columns `min_oh_ang`, `max_oh_ang`,
+`n_proton_transfer_flags`, `geometry_valid`).
 
-**Caveat on the -8792 eV point specifically**: this is a genuine,
-converged (fmax satisfied) result from this pipeline, not a numerical
-error -- but its magnitude is extreme even for "spurious." The restrained
-optimizer let the actual O-O distance drift to 1.034 A (well past its 0.7
-A target; the model's forces overpowered the restraint) while some other
-part of the geometry collapsed into a very deep, likely nonphysical
-configuration. Treat this point as evidence of a badly-behaved region of
-the PES, not as "the model's energy at O-O=0.7 A" in a literal sense --
-the model was not actually evaluated at that literal separation once the
-restraint was overpowered. The 1.0/0.8/0.6 A rows are better-behaved
-(actual stayed close to target) and are the more citable numbers for "how
-much deeper is the spurious minimum."
+- MACE-OFF23-small invalid points (contiguous): O-O target = 0.2, 0.3, 0.4,
+  0.5, 0.6 A. Valid everywhere from 0.7 A up to 7.0 A.
+- ANI-2x invalid points (NOT contiguous): O-O target = 0.3, 0.6, 0.7, 0.8,
+  0.9 A -- but 0.2, 0.4, 0.5 A are valid. This non-contiguous pattern is
+  itself a signal of a genuinely rugged/multi-basin breakdown region for
+  ANI-2x, not a clean single threshold.
 
-## 3. ANI-2x result -- UNEXPECTED, flagged, not yet explained
+## 3. Diagnostic checks (run before writing any conclusion, as requested)
 
-Run as a negative control (Ranasinghe et al. describe ANI-2x as tracking
-their DFT reference well, with no reported spurious minimum). Result:
+### Check 1: geometry dump at 0.5/0.6/0.7/0.8/1.0/1.5/2.9 A
 
-| | O-O distance (target) | Energy |
-|---|---|---|
-| Physical minimum (2.5-3.5 A window) | 2.7 A | -4157.6191 eV |
-| Global minimum (entire scan) | 0.6 A | **-4258.9194 eV** |
+Script: `scripts/check1_geometry.py` (dumps all O-H distances and H-O-H
+angles from the checkpoint trajectories; its own pass/fail threshold
+predates the canonical dual-threshold check and should not be trusted over
+the CSV's `geometry_valid` column, but its raw distance dumps are the
+underlying evidence). Representative findings from the FIRST (now
+retracted) multi-start run, which is what motivated building the canonical
+check in the first place:
+- MACE at target=0.7 A: O_A-H(bridge) = 0.62 A (collapsed; real O-H is
+  ~0.96-0.98 A), O_B-H2 = 0.62 A (collapsed). This was the geometry behind
+  the originally-reported -8792 eV point.
+- ANI-2x at target=0.8/1.0 A: O_A-H(bridge) = 6.65/7.20 A -- a hydrogen
+  displaced several Angstrom from its own oxygen. Not "a dimer with a
+  short O-O distance" by any reading.
+- At target=1.5 A and 2.9 A, BOTH models show fully normal geometry (O-H
+  ~0.96-0.98 A, H-O-H ~97-117 deg, no proton-transfer flags) -- confirming
+  the normal/physical region of the scan is trustworthy as-is.
 
-`check_spurious_minimum` also flags `HAS SPURIOUS MINIMUM: True` for
-ANI-2x -- a ~101 eV deeper global minimum at short range. This
-**contradicts** the paper's description of ANI-2x as well-behaved on this
-test, so it should NOT be taken at face value as "ANI-2x also has this
-failure" without further investigation. Two explanations are open and
-UNRESOLVED as of this writing:
+### Check 2: LBFGS convergence (max force vs. distance)
 
-  a) ANI-2x genuinely does show a (perhaps less dramatic, previously
-     under-emphasized) version of this artifact -- plausible, since ANI-2x
-     has no explicit short-range repulsion correction and is known to
-     extrapolate poorly outside its training distribution.
-  b) Something in this pipeline (most likely the random-reorientation
-     multi-start mechanism in `geometry.random_perturbed_water_dimer`, or
-     how `torchani`'s ASE calculator handles severely out-of-distribution
-     geometries) produces an artifact for ANY model at extreme clash
-     distances, independent of genuine model quality -- which would also
-     cast some doubt on how to interpret the MACE result's exact depth
-     (though not on its existence/direction, which is independently
-     supported by the paper).
+Plot: `results/test3_dimer/force_convergence.png`. Non-converged points
+are marked with an X, not silently included.
 
-Full data: `results/test3_dimer/ani2x.csv`. **Do not cite the ANI-2x
-number as a confirmed finding without resolving (a) vs (b) first** -- this
-is flagged explicitly so it isn't accidentally treated as settled.
+This check found a real bug, now fixed: the originally-reported MACE
+-8792 eV point (O-O target 0.7 A) was labeled `converged=True` by the
+pipeline, but recomputing forces at the exact same saved geometry gave a
+max force of 2.22 eV/A -- nowhere near the fmax=0.05 target. ASE's LBFGS
+had accepted one more position update after its internal convergence
+check, landing in a region of this rugged PES with a completely different
+(large) force -- a real discrepancy between "the state LBFGS checked" and
+"the state that got saved," not a reporting error on our part after the
+fact. Fixed in `mlip_audit/test3_dimer.py::_relax_candidate`: the max
+force is now read immediately after `opt.run()` returns, before the
+calculator is swapped to compute the reported energy, so this class of bug
+cannot recur silently. After the fix, only ONE point in the entire
+re-run (MACE, O-O target 0.5 A) is genuinely non-converged, and it is
+correctly labeled as such.
 
-## 4. Exact package versions (pip freeze, key packages)
+### Check 3: method sensitivity (restraint vs. hard FixBondLength)
 
-Two separate environments were used (see "Debugging trail" and
-`requirements.txt` for why: `mace-torch` hard-pins `e3nn==0.4.4`, which is
-incompatible with `fairchem-core`'s `e3nn>=0.5` requirement).
+Script: `scripts/check3_method_sensitivity.py`. Both models, starting from
+an independently-verified clean 1.5 A geometry, single warm-started chain
+(NO multi-start, to isolate the constraint-mechanism variable), swept
+1.4 A down to 0.2 A under (a) a hard `FixBondLengths` constraint
+(tolerance loosened to 1e-6 to avoid the numerical failure documented in
+the original debugging trail) and (b) the harmonic restraint. Full data:
+`results/test3_dimer/{model}_method_sensitivity.csv`.
+
+Result: the two methods agree closely everywhere both produce a
+geometry-valid point (energies typically match to within ~0.1-0.3 eV at
+the same target distance), and BOTH methods show the same qualitative
+picture as the main scan: smooth monotonic rise while valid, then total
+geometry breakdown. One specific test of the original hypothesis ("if the
+ANI-2x artifact disappears under restraints but MACE's persists, that
+explains the discrepancy") is informative here: under the hard constraint,
+MACE showed an energy of -4322.47 eV at O-O=0.6 A -- deeper than physical,
+and it would have been a clean confirmation of the acceptance criterion,
+EXCEPT its geometry has max_OH = 2.64 A (a dissociated O-H), so it fails
+the same validity gate. The hypothesis as stated is not what explains the
+discrepancy: the discrepancy dissolved once geometry validity was checked
+at all, for both models, under both methods.
+
+## 4. Pipeline changes made in response to this diagnostic
+
+- `mlip_audit/geometry.py`: added `check_dimer_geometry()` /
+  `DimerGeometryReport`, the canonical structural-sanity check. Flags a
+  point invalid if ANY of the four O-H distances is either collapsed
+  (`< OH_COLLAPSE_THRESHOLD_ANG = 0.85`) or dissociated
+  (`> OH_STRETCH_WARN_ANG = 1.3`). Both thresholds are judgment calls
+  informed by the real O-H equilibrium bond length (~0.96-0.98 A); they
+  are not derived from anything more rigorous than "clearly not a bonded
+  O-H distance in either direction," and a different reasonable person
+  could draw them slightly differently. The dissociation half of this
+  check was added only after finding that the collapse-only version
+  missed points where EVERY O-H distance was 3-11 A (fully fragmented,
+  not merely "stretched").
+- `mlip_audit/test3_dimer.py`: the multi-start candidate-selection logic
+  now prefers a converged, geometry-valid candidate over one that is
+  merely lower-energy -- previously, an invalid-geometry candidate's
+  (meaningless) energy could win the multi-start comparison outright. New
+  CSV columns: `final_max_force_eV_per_ang` (captured live, see Check 2),
+  `min_oh_ang`, `max_oh_ang`, `n_proton_transfer_flags`, `geometry_valid`.
+- `mlip_audit/plotting.py`: `check_spurious_minimum` now returns
+  quantitative `raw_depth_eV` / `raw_depth_kcal_mol` /
+  `valid_depth_eV` / `valid_depth_kcal_mol` instead of a boolean (see
+  Section 2). Added `plot_force_convergence()`. `plot_dimer_scan()` now
+  marks geometry-invalid points with hollow markers.
+- Both official scans (MACE-OFF23-small, ANI-2x) were re-run end to end
+  with this corrected pipeline; the numbers in this document are from
+  those re-runs, not the original (retracted) ones.
+
+## 5. Exact package versions (pip freeze, key packages)
+
+Two separate environments were used (see `requirements.txt` for why:
+`mace-torch` hard-pins `e3nn==0.4.4`, incompatible with `fairchem-core`'s
+`e3nn>=0.5` requirement).
 
 `.venv` (ani-mace stack; used for both results above):
 ```
@@ -130,61 +207,44 @@ Both venvs were created fresh with Python 3.11.9
 this Windows machine, torch installed from the CPU-only wheel index
 (`https://download.pytorch.org/whl/cpu`) since there is no local GPU.
 
-## 5. What is NOT yet built / run
+## 6. What is NOT yet built / run
 
 - **UMA-S: not run.** `.venv-uma` is created and `requirements-uma.txt`
   installed successfully (confirmed: `fairchem-core==2.22.0` imports). A
-  cached HuggingFace token exists (`huggingface_hub.get_token()` found
-  one). But neither `tests/test_charge_spin.py::test_charge_reaches_model`
-  (the real, non-skipped version) nor a UMA-S Test 3 scan have actually
-  been executed yet. This is the next concrete step.
+  cached HuggingFace token exists. Neither the real
+  `test_charge_reaches_model` test nor a UMA-S Test 3 scan have been
+  executed. When this happens, it must go through the SAME
+  geometry-validity + convergence gating as MACE/ANI-2x, not the original
+  (retracted) raw-minimum approach.
 - **Tests 1, 2, 4: not built at all**, per this session's explicit scope.
-- **Colab: not exercised.** Everything above ran on local CPU. The
-  notebook (`notebooks/01_dimer_scan.ipynb`) has not been run end-to-end
-  on Colab; its Part A / Part B split (for the two-environment issue) is
-  untested in that environment.
-- **ANI-2x vs pipeline-artifact question (Section 3) is open.** Needs
-  investigation before the ANI-2x number is used in any writeup.
-- **`results/checkpoints/*.extxyz`** (per-point relaxed geometries) exist
-  locally from these runs but are gitignored (regenerable, not needed to
-  interpret the CSVs) -- not part of this commit.
+- **Colab: not exercised.** Everything above ran on local CPU.
+- **`results/checkpoints/*.extxyz`** exist locally but are gitignored
+  (regenerable) -- not part of this commit.
 
-## Debugging trail (why the implementation differs from the original spec)
+## What would still need to happen to give this a final verdict
 
-Two rounds of debugging were needed to go from "pipeline runs" to "pipeline
-reproduces the published result reliably." Both are documented in code;
-summarized here for anyone resuming this work:
-
-1. **Hard constraint -> soft restraint.** The spec called for
-   `ase.constraints.FixBondLength`. In practice, at the huge force
-   magnitudes near an atomic clash, ASE's constraint-projection algorithm
-   either raised `RuntimeError("Did not converge")` or (once its tolerance
-   was loosened) let LBFGS diverge into multi-million-eV garbage --
-   producing a false "no spurious minimum" result that would have been
-   wrong about the model, not just a numerical hiccup. Checking
-   Ranasinghe et al.'s actual methods section (Sec. 2.2.3) showed their
-   ML-potential scans used an OpenMM harmonic distance RESTRAINT (k=10
-   GJ/mol/nm^2), not a hard constraint. Switched to match
-   (`mlip_audit/restraints.py::HarmonicDistanceRestraint`,
-   k=1036.4 eV/A^2, same physical stiffness after unit conversion).
-2. **Single warm-started chain -> multi-start.** Even with the restraint,
-   a single sequential (warm-started) LBFGS chain from 7.0 A down to 0.2 A
-   found only a modest, NOT-deeper local dip (~-4153 eV) for
-   MACE-OFF23-small -- which would have been a false negative on the
-   acceptance criterion. Ad-hoc testing showed the restrained landscape at
-   short O-O is multi-basin: different starting orientations at the SAME
-   target distance converged to energies differing by thousands of eV.
-   Added multi-start (`DIMER_N_RESTARTS=5`: the warm-started continuation
-   plus 4 randomly-reoriented alternatives per point, keeping the
-   lowest-energy converged result and carrying it forward as the next
-   point's warm start). This is what actually surfaced the -8792 eV point.
-   A single deterministic LBFGS chain is not a reliable way to test "does
-   a spurious minimum exist" on a landscape already shown to be rugged.
-
-Also fixed along the way: `mlip_audit/plotting.py::check_spurious_minimum`
-originally compared against "the minimum over O-O >= 1.0 A," which
-double-counted the 1.0 A point itself (already anomalously deep) as part
-of the "physical" reference. Fixed to use a dedicated 2.5-3.5 A window
-around the known ~2.9 A minimum for the reference value, and to report the
-whole-curve global minimum separately (matching how the paper frames its
-own result).
+The acceptance criterion is NOT confirmed, but it is also not cleanly
+falsified -- "we could not find a valid example with the methods we tried"
+is not the same as "no valid example exists." Concretely untried:
+1. **The literal starting geometry.** Ranasinghe et al. start from "the
+   Smith stationary point 1," then a real wB97X/6-31G(d) optimization.
+   This session used a hand-built idealized Cs-symmetric guess instead
+   (`geometry.build_water_dimer`), reasoning that the optimizer should
+   wash out the difference -- but the whole finding of this diagnostic
+   round is that the short-range landscape is rugged/history-dependent
+   enough for the exact path to matter a great deal. Building the actual
+   literature starting geometry (or at least a DFT-optimized one) and
+   re-running is the single most direct way to close this gap.
+2. **Finer sampling right at the breakdown boundary.** This scan steps in
+   0.1 A increments (matching the paper's stated 0.01 nm). A valid,
+   deeper minimum occupying a window narrower than 0.1 A between two
+   sampled points would be invisible here. Given how sharply behavior
+   changed between adjacent 0.1 A points in this data, this is plausible.
+3. **The paper's own geometries.** Unavailable to this session. If
+   Ranasinghe et al.'s SI includes structures (not just energies) for
+   their MACE-OFF23 "spurious minima," checking those against the same
+   `check_dimer_geometry` gate used here would directly settle whether
+   their own published finding involves an intact dimer or not -- which
+   would also settle whether this session's inability to reproduce it
+   reflects a real difference in conclusion, or just a difference in how
+   carefully the geometry was checked.

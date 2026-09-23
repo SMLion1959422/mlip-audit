@@ -15,6 +15,8 @@ Indices 0 and 3 (the two oxygens) are the pair constrained by
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 from ase import Atoms
 
@@ -179,3 +181,91 @@ def random_perturbed_water_dimer(
         atoms.positions[idx] = o_b + r_b @ (atoms.positions[idx] - o_b)
 
     return atoms
+
+
+# Real O-H equilibrium bond length is ~0.96-0.98 A. Below OH_COLLAPSE_
+# THRESHOLD_ANG we are no longer looking at a chemically intact O-H bond
+# (collapsed). Above OH_STRETCH_WARN_ANG we are ALSO no longer looking at
+# one (dissociated/fragmented) -- both ends were empirically necessary:
+# min-only checking missed cases where EVERY O-H distance was 3-11 A (the
+# whole dimer had exploded apart under an extreme restraint target, not
+# "collapsed" but just as meaningless as a dimer-PES data point). is_valid
+# requires ALL FOUR O-H distances -- not just the smallest -- to fall
+# inside [OH_COLLAPSE_THRESHOLD_ANG, OH_STRETCH_WARN_ANG]; a single
+# collapsed OR a single dissociated O-H is enough to invalidate the point.
+OH_COLLAPSE_THRESHOLD_ANG = 0.85
+OH_STRETCH_WARN_ANG = 1.3
+
+
+@dataclass
+class DimerGeometryReport:
+    """Structural sanity report for a relaxed water-dimer geometry.
+
+    is_valid is the PRIMARY gate for whether an energy at this geometry
+    means anything as "a water dimer's potential energy": False iff ANY of
+    the four O-H distances falls outside [OH_COLLAPSE_THRESHOLD_ANG,
+    OH_STRETCH_WARN_ANG] (either collapsed or dissociated). Proton
+    migration (n_proton_transfer_flags) is recorded but does NOT by itself
+    flip is_valid to False -- it's a softer signal worth inspecting
+    alongside, not one of the two sharp criteria (collapse/dissociation)
+    the audit protocol uses to discard a point outright.
+    """
+
+    oh_distances: dict[str, float]  # e.g. {"O_A-H_bridge": 0.96, ...}
+    hoh_angle_a_deg: float
+    hoh_angle_b_deg: float
+    min_oh_ang: float
+    max_oh_ang: float
+    n_proton_transfer_flags: int  # count of H's closer to the OTHER monomer's O than their own
+    is_valid: bool  # False iff min_oh_ang < COLLAPSE or max_oh_ang > STRETCH_WARN
+    is_oh_collapsed: bool  # True iff min_oh_ang < OH_COLLAPSE_THRESHOLD_ANG
+    is_oh_dissociated: bool  # True iff max_oh_ang > OH_STRETCH_WARN_ANG
+
+
+def check_dimer_geometry(atoms: Atoms) -> DimerGeometryReport:
+    """Structural sanity check for a water dimer geometry (see
+    DimerGeometryReport). Use this on every relaxed structure Test 3
+    reports an energy for -- a deep "minimum" whose geometry fails this
+    check is not evidence about the model's dimer PES.
+    """
+    oh = {
+        "O_A-H_bridge": atoms.get_distance(O_INDEX_A, H_INDEX_A_BRIDGE),
+        "O_A-H_free": atoms.get_distance(O_INDEX_A, H_INDEX_A_FREE),
+        "O_B-H1": atoms.get_distance(O_INDEX_B, H_INDEX_B1),
+        "O_B-H2": atoms.get_distance(O_INDEX_B, H_INDEX_B2),
+    }
+    min_oh = min(oh.values())
+    max_oh = max(oh.values())
+
+    def angle_deg(i_center, i1, i2):
+        v1 = atoms.positions[i1] - atoms.positions[i_center]
+        v2 = atoms.positions[i2] - atoms.positions[i_center]
+        cos_theta = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+        return float(np.degrees(np.arccos(np.clip(cos_theta, -1.0, 1.0))))
+
+    hoh_a = angle_deg(O_INDEX_A, H_INDEX_A_BRIDGE, H_INDEX_A_FREE)
+    hoh_b = angle_deg(O_INDEX_B, H_INDEX_B1, H_INDEX_B2)
+
+    n_proton_transfer = 0
+    for h_idx, own_o, other_o in [
+        (H_INDEX_A_BRIDGE, O_INDEX_A, O_INDEX_B),
+        (H_INDEX_A_FREE, O_INDEX_A, O_INDEX_B),
+        (H_INDEX_B1, O_INDEX_B, O_INDEX_A),
+        (H_INDEX_B2, O_INDEX_B, O_INDEX_A),
+    ]:
+        if atoms.get_distance(h_idx, other_o) < atoms.get_distance(h_idx, own_o):
+            n_proton_transfer += 1
+
+    is_collapsed = min_oh < OH_COLLAPSE_THRESHOLD_ANG
+    is_dissociated = max_oh > OH_STRETCH_WARN_ANG
+    return DimerGeometryReport(
+        oh_distances=oh,
+        hoh_angle_a_deg=hoh_a,
+        hoh_angle_b_deg=hoh_b,
+        min_oh_ang=min_oh,
+        max_oh_ang=max_oh,
+        n_proton_transfer_flags=n_proton_transfer,
+        is_valid=not (is_collapsed or is_dissociated),
+        is_oh_collapsed=is_collapsed,
+        is_oh_dissociated=is_dissociated,
+    )
