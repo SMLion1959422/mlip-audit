@@ -181,11 +181,24 @@ def _append_csv_row(csv_path: Path, row: dict) -> None:
 
 
 def _load_warm_start(
-    checkpoint_path: Path, first_target: float, charge: int, spin: int
+    checkpoint_path: Path,
+    first_target: float,
+    charge: int,
+    spin: int,
+    start_geometry_path: Path | None = None,
 ) -> Atoms:
-    """Return the starting Atoms for the scan: the last checkpointed
-    geometry (rigidly slid to `first_target`) if one exists, else a fresh
-    idealized dimer built at `first_target`."""
+    """Return the starting Atoms for the scan.
+
+    Priority: (1) the last checkpointed geometry (rigidly slid to
+    `first_target`), if resuming; (2) `start_geometry_path` if given --
+    any ASE-readable structure file (e.g. an XYZ), rigidly translated so
+    its O-O distance hits `first_target` while preserving its own
+    internal geometry and relative orientation exactly (same mechanism as
+    the normal warm-start slide between scan points -- see
+    geometry.set_oo_distance). Atom order must match this module's
+    convention (O, H, H, O, H, H -- see mlip_audit.geometry); (3)
+    otherwise a fresh idealized dimer via geometry.build_water_dimer.
+    """
     if checkpoint_path.exists():
         atoms = ase_read(checkpoint_path, index=-1)
         atoms.constraints = []
@@ -194,6 +207,18 @@ def _load_warm_start(
             "Resuming from checkpoint %s (last saved O-O=%.3f A), warm-started to %.3f A",
             checkpoint_path,
             get_oo_distance(atoms),
+            first_target,
+        )
+        return atoms
+    if start_geometry_path is not None:
+        atoms = ase_read(start_geometry_path)
+        atoms.constraints = []
+        set_oo_distance(atoms, first_target)
+        atoms.info.update({"charge": charge, "spin": spin})
+        logger.info(
+            "Starting from custom geometry %s (O-O=%.3f A as loaded), warm-started to %.3f A",
+            start_geometry_path,
+            get_oo_distance(ase_read(start_geometry_path)),
             first_target,
         )
         return atoms
@@ -257,6 +282,7 @@ def run_scan(
     out_dir: Path | None = None,
     checkpoint_dir: Path | None = None,
     resume: bool = True,
+    start_geometry_path: Path | None = None,
 ) -> Path:
     """Run (or resume) the Test 3 O-O scan for one model. Returns the CSV path."""
     out_dir = Path(out_dir) if out_dir else RESULTS_DIR / "test3_dimer"
@@ -295,7 +321,7 @@ def run_scan(
     calc = get_calc(model, device=device)
     rng = np.random.default_rng(seed)
 
-    atoms = _load_warm_start(checkpoint_path, remaining[0], charge, spin)
+    atoms = _load_warm_start(checkpoint_path, remaining[0], charge, spin, start_geometry_path)
 
     for target in remaining:
         t0 = time.time()
@@ -424,6 +450,15 @@ def main() -> None:
     parser.add_argument("--checkpoint-dir", type=Path, default=None)
     parser.add_argument("--no-resume", action="store_true")
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument(
+        "--start-geometry",
+        type=Path,
+        default=None,
+        help="ASE-readable structure file (e.g. XYZ) to use as the scan's starting "
+        "geometry instead of the idealized build_water_dimer guess. Atom order must "
+        "be O,H,H,O,H,H (see mlip_audit.geometry). Only used when not resuming from "
+        "an existing checkpoint.",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -446,6 +481,7 @@ def main() -> None:
         out_dir=args.out_dir,
         checkpoint_dir=args.checkpoint_dir,
         resume=not args.no_resume,
+        start_geometry_path=args.start_geometry,
     )
     logger.info("Done. Results: %s", csv_path)
 

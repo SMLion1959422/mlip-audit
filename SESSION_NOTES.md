@@ -10,23 +10,28 @@ something changes.
 - Repo scaffold, model-loading harness (`mlip_audit/models.py`), and
   Test 3 (`mlip_audit/test3_dimer.py`) are built and working.
 - MACE-OFF23-small's and ANI-2x's Test 3 scans are DONE, and both went
-  through a rigorous geometry-validity + convergence diagnostic (FOUR
-  checks: geometry dump, force-convergence, constraint-mechanism
-  sensitivity, and an unconstrained basin-of-attraction test) requested
-  mid-session in two rounds. **The acceptance criterion (a valid,
-  geometry-intact, operationally-reachable spurious minimum deeper than
-  physical) is currently NOT MET for either model** -- see `RESULTS.md`
-  Section 1. This is now backed by a real negative result, not just
-  absence of evidence: Check 4 released both models from real steric
+  through a rigorous geometry-validity + convergence diagnostic (FIVE
+  checks across three rounds: geometry dump, force-convergence,
+  constraint-mechanism sensitivity, an unconstrained basin-of-attraction
+  test, and a from-scratch reconstruction of the paper's own starting
+  geometry to rule out that variable). **The acceptance criterion (a
+  valid, geometry-intact, operationally-reachable spurious minimum deeper
+  than physical) is currently NOT MET for either model** -- see
+  `RESULTS.md` Section 1. This is now backed by real negative results, not
+  just absence of evidence: Check 4 released both models from real steric
   clashes (O-O = 1.8, 2.2 A) with NO restraint/constraint at all, and
   every single run (6/6) relaxed back to the physical minimum rather than
-  collapsing -- i.e. a real minimization/docking workflow would not
-  actually fall into the broken-geometry region either model shows under
-  the artificial restrained scan. An EARLIER version of `RESULTS.md`
-  claimed the criterion WAS met for MACE-OFF23-small; that was wrong and
-  has been explicitly retracted. If you find any other document, comment,
-  or cached belief claiming "MACE acceptance criterion MET," it is stale
-  -- `RESULTS.md`'s current text is the source of truth.
+  collapsing. Section 7 re-ran the whole scan from an independently
+  reconstructed, DFT-optimized "Smith stationary point 1" starting
+  geometry (matching the paper's described structure/level of theory as
+  closely as could be reconstructed -- no literal coordinates were
+  obtainable from the paper or its SI) and got the SAME result (valid
+  depth = 0.00 eV, both models) -- so this is not an artifact of this
+  session's original idealized starting guess either. An EARLIER version
+  of `RESULTS.md` claimed the criterion WAS met for MACE-OFF23-small; that
+  was wrong and has been explicitly retracted. If you find any other
+  document, comment, or cached belief claiming "MACE acceptance criterion
+  MET," it is stale -- `RESULTS.md`'s current text is the source of truth.
 - UMA-S: environment is ready (`.venv-uma`, see below) but NOTHING has
   been run yet -- no charge/spin test, no Test 3 scan. This is the most
   concrete unstarted piece of work, AND it must go through the same
@@ -61,6 +66,21 @@ specifically -- the default `python`/`py` on PATH may resolve to a broken
 or free-threaded build; Python 3.11.9 at that path is known-good. See
 `RESULTS.md` Section 5 for exactly what versions ended up installed.)
 
+**A third environment** was added this session, separate from the two
+above and NOT a pip venv: `mlip-audit-qm`, a **conda** environment (this
+machine has miniconda3 at `C:\Users\srika\miniconda3`), used only for the
+one-off DFT geometry reconstruction in `scripts/build_smith_sp1_geometry.py`
+(PySCF has no Windows pip wheels; conda-forge does). Not needed for
+anything else in this repo -- don't bother recreating it unless you need
+to rebuild or extend the Smith SP1 geometry. If you do:
+```bash
+conda create -n mlip-audit-qm -c conda-forge python=3.11 pyscf ase numpy -y
+conda run -n mlip-audit-qm pip install pyberny
+OMP_NUM_THREADS=2 conda run -n mlip-audit-qm python scripts/build_smith_sp1_geometry.py
+```
+The `OMP_NUM_THREADS=2` is required -- see that script's docstring for the
+Windows-specific memory bug it works around.
+
 ## Immediate next steps, in priority order
 
 1. **Run the real UMA-S charge/spin test.**
@@ -89,22 +109,22 @@ or free-threaded build; Python 3.11.9 at that path is known-good. See
    result. Record it in `RESULTS.md` as a new section, whatever it shows.
 
 3. **Close the open gaps listed in `RESULTS.md`'s "What would still need
-   to happen" section** -- re-prioritized after Check 4 (the unconstrained
-   basin-of-attraction test), in order: (a) the paper's own SI structures,
-   if obtainable, to check whether THEIR published spurious minimum is
-   itself geometry-valid and operationally reachable by the same checks
-   used here -- now the highest-value gap, since Check 4 found a real
-   negative result rather than just absence of evidence; (b)
-   finer-than-0.1-A sampling right at the breakdown boundary, somewhat
-   de-prioritized since Check 4 suggests even a narrow valid basin there
-   would need its own reachable basin of attraction to matter
-   operationally; (c) the literal literature starting geometry ("Smith
-   stationary point 1"), de-prioritized since Check 4 got the same
-   "returns to physical minimum" outcome from three different starting
-   geometries; (d) NEW -- more/different unconstrained starting points
-   for Check 4 itself, especially releasing the restraint from an already
-   INVALID (dissociated) structure rather than only from valid ones, to
-   more directly probe the broken region's basin of attraction boundary.
+   to happen" section** -- re-prioritized after Check 4 AND Section 7 (the
+   Smith SP1 reconstruction, which closed the "literal starting geometry"
+   gap as far as this session can), in order: (a) the paper's own raw
+   structures, if ever obtainable (e.g. by contacting the authors) --
+   still THE highest-value remaining gap, since this session can now only
+   reconstruct, not obtain, their geometry, and a direct check would
+   settle things outright; (b) cross-checking this session's harmonic
+   restraint against an actual OpenMM run, since the paper used OpenMM and
+   this session used a hand-written ASE-based equivalent -- untested
+   whether they agree numerically, though the physics should match; (c)
+   finer-than-0.1-A sampling right at the breakdown boundary, still
+   de-prioritized for the same reason as before (Check 4); (d)
+   more/different unconstrained starting points for Check 4's protocol,
+   including from the Section 7 SP1-reconstruction run (not yet tested
+   with the Check-4 unconstrained-release protocol) and from
+   already-invalid (dissociated) structures rather than only valid ones.
 
 4. **Tests 1, 2, 4** -- out of scope for this session by explicit
    instruction; don't start these without being asked.

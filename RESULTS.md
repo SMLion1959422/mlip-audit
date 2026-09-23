@@ -7,16 +7,29 @@ GPU available this session); Colab GPU not used yet.
 acceptance criterion "MET" for MACE-OFF23-small.** That conclusion was
 premature -- it was built on energies from relaxed structures that turned
 out, on inspection, to have collapsed or dissociated O-H bonds (not an
-intact water dimer). Four diagnostic checks were run before writing this
+intact water dimer). Five diagnostic checks were run before writing this
 version: (1) geometry dump, (2) LBFGS convergence, (3) constraint-mechanism
-sensitivity, and (4) an unconstrained basin-of-attraction test -- see
-"Diagnostic checks" below for the full trail. The corrected, current status
-is in Section 1. Check 4 in particular directly tested (per an explicit
-request) whether the broken-geometry region is something an ordinary
-energy minimizer would actually wander into from a realistic clash, as
-opposed to only being reachable via the artificial restrained scan -- it
-is NOT reachable that way, for either model, which makes "NOT MET" a
-considerably stronger conclusion than it was before Check 4.
+sensitivity, (4) an unconstrained basin-of-attraction test, and (5) a
+from-scratch reconstruction of the paper's own starting geometry (Section
+7) to test whether this session's idealized starting guess was itself the
+source of the disagreement -- see "Diagnostic checks" and Section 7 below
+for the full trail. The corrected, current status is in Section 1.
+
+Two checks in particular changed how strong a claim this document can
+make. Check 4 tested whether the broken-geometry region is something an
+ordinary energy minimizer would actually wander into from a realistic
+clash, as opposed to only being reachable via the artificial restrained
+scan -- it is NOT reachable that way, for either model. Section 7 tested
+whether this session's non-reproduction was an artifact of using an
+idealized rather than the paper's literal starting geometry -- rebuilding
+a literature-informed reconstruction of "Smith stationary point 1" from
+scratch (via a real wB97X/6-31G(d) optimization, since no coordinates were
+obtainable from the paper or its SI) and re-running both models gave the
+SAME result (valid depth = 0.00 eV for both models, both starting
+geometries). Together these make "NOT MET" a considerably stronger,
+better-supported conclusion than earlier rounds of this document could
+claim -- see Section 7's final paragraph for exactly how much this does,
+and does not, license saying about the published result.
 
 ## 1. Acceptance criterion (as set for this session)
 
@@ -286,50 +299,153 @@ this Windows machine, torch installed from the CPU-only wheel index
 - **`results/checkpoints/*.extxyz`** exist locally but are gitignored
   (regenerable) -- not part of this commit.
 
+## 7. Starting-geometry sensitivity: Smith SP1 reconstruction
+
+Ranasinghe et al. start from "the Smith stationary point 1" water dimer,
+optimized at wB97X/6-31G(d) with ORCA. Everything in Sections 1-6 used a
+hand-built, idealized, PLANAR Cs-symmetric guess instead
+(`geometry.build_water_dimer`) -- the single biggest acknowledged gap from
+the paper's exact setup, and the top item in the previous version's "what
+would still need to happen" list. This section closes it as far as this
+session is able to.
+
+**Step 1: obtain or reconstruct the exact structure.** Checked
+Ranasinghe et al.'s SI (fetched the arXiv PDF, both main text and the
+appended Supporting Information) for deposited coordinates: not present.
+The SI contains only training loss curves (Figs. S1-S7) and
+quasi-harmonic analysis tables (Tables S1-S5) -- no structure files, no
+data/code availability statement pointing to one. Their citation for
+"Smith stationary point 1" (ref. 20) points to Gillan, Alfe & Michaelides,
+"Perspective: How good is DFT for water?" (J. Chem. Phys. 144, 130901,
+2016), which is paywalled and could not be fetched by this session (HTTP
+403). A web search independently confirmed what "Smith SP1" is: one of
+ten water-dimer stationary points characterized by Smith, Swanton, Pople,
+Schaefer & Radom (J. Chem. Phys. 92, 1240, 1990); SP1 specifically is
+established in the literature as the true global minimum -- a near-linear,
+NON-PLANAR, Cs-symmetric hydrogen-bonded structure (confirmed via a
+secondary source, "The water dimer II: Theoretical investigations",
+which reviews the Smith stationary points in detail). No literal
+Cartesian coordinates were obtainable from any accessible source.
+
+Per the fallback plan: **reconstructed** the structure. Built a
+topologically-correct non-planar Cs-symmetric starting guess (donor
+monomer + the O-O axis define a mirror plane; the acceptor's two H atoms
+are placed as exact mirror images of each other through that plane,
+rather than splayed within it as the simpler planar guess does), then ran
+a REAL geometry optimization at wB97X/6-31G(d) -- the paper's exact
+level of theory -- using PySCF + pyberny. (PySCF has no Windows wheels;
+installed via a dedicated conda environment, `mlip-audit-qm`, using
+conda-forge; needed `OMP_NUM_THREADS=2` to work around a Windows-build-
+specific memory allocation bug -- see
+`scripts/build_smith_sp1_geometry.py` docstring for full detail.) The
+optimization converged in 31 steps to a structure that IS Cs-symmetric
+(acceptor H's ended up as exact mirror images in z, to 5 decimal places,
+despite no symmetry constraint being imposed on the optimizer) with
+sensible parameters: O-O = 2.840 A, near-linear H-bond (O-H...O = 164.2
+deg), donor's bonded O-H elongated (0.973 A) relative to its free O-H
+(0.963 A) and the acceptor's (0.966 A both) -- all textbook signatures of
+the real water dimer minimum. Saved: `geometries/smith_sp1_reconstructed.xyz`.
+**This is a reconstruction, not the paper's own deposited structure** --
+stated plainly, as it should be every time this geometry is cited.
+
+**Step 2: re-run the scan.** Added `--start-geometry` to
+`mlip_audit.test3_dimer` (a disclosed, permanent pipeline feature, not a
+one-off hack -- see `_load_warm_start`) so a custom structure can replace
+the idealized guess as the scan's starting point, everything else
+(restraint mechanism, k=10 GJ/mol/nm^2, multi-start, geometry/convergence
+validation) unchanged. Re-ran both models over the paper's exact range,
+0.02-0.40 nm = **0.2-4.0 A** (narrower than Sections 1-6's 0.2-7.0 A) at
+0.1 A steps, from the SP1 reconstruction. Full data:
+`results/test3_dimer_sp1/{model}.csv`; plots:
+`results/test3_dimer_sp1/dimer_scan_sp1.png` and `force_convergence_sp1.png`.
+
+**Step 3: side-by-side comparison.**
+
+| Model | Starting geometry | Physical min (eV) | Valid global min (eV) | Valid depth | Raw global min (eV) | Raw depth |
+|---|---|---|---|---|---|---|
+| mace-off23-small | idealized planar guess (Sections 1-6) | -4162.4494 @ 2.9 A | -4162.4494 @ 2.9 A | 0.00 eV | -4165.8032 @ 0.6 A | 3.35 eV = 77.3 kcal/mol |
+| mace-off23-small | **Smith SP1 reconstruction** | -4162.4500 @ 2.9 A | -4162.4500 @ 2.9 A | **0.00 eV** | -4450.3785 @ 0.2 A | 287.93 eV = 6639.8 kcal/mol |
+| ani2x | idealized planar guess (Sections 1-6) | -4157.6191 @ 2.7 A | -4157.6191 @ 2.7 A | 0.00 eV | -4258.9194 @ 0.6 A | 101.30 eV = 2336.0 kcal/mol |
+| ani2x | **Smith SP1 reconstruction** | -4157.6187 @ 2.8 A | -4157.6187 @ 2.8 A | **0.00 eV** | -4157.6187 @ 2.8 A | **0.00 eV** (no raw excursion at all) |
+
+**The physical minimum energy matches to within ~0.0006 eV between the
+two starting geometries for both models** -- strong cross-validation that
+both starting points converge to the same true minimum, as expected for a
+real PES feature independent of how you got there. **The VALID depth is
+0.00 eV in all four runs** -- completely unchanged by starting geometry.
+If anything, ANI-2x's raw (unfiltered) numbers are LESS dramatic from the
+SP1 starting point (no deep excursion at all, vs. 2336 kcal/mol from the
+idealized guess) -- the opposite of what "a more realistic starting
+geometry reveals the artifact" would predict.
+
+**This directly answers the question this diagnostic round was run to
+answer: the starting geometry does NOT account for this session's
+difference from the published result.** The finding (no geometry-valid,
+operationally-reachable minimum deeper than physical, for either model)
+is robust across two starting geometries that differ substantially in
+construction (hand-built idealized planar guess vs. an independently
+wB97X/6-31G(d)-optimized, literature-informed, non-planar Cs-symmetric
+reconstruction) and, from Checks 3-4, across constraint mechanism and
+reachability testing as well.
+
+**What this does NOT close**: this session still does not have Ranasinghe
+et al.'s own literal structure (unobtainable, per Step 1), nor their exact
+toolchain (ORCA for the DFT optimization; OpenMM for the ML-potential
+restraint scans, vs. this session's PySCF and ASE respectively). "The
+starting geometry doesn't explain it" is now reasonably well-supported;
+"our result contradicts theirs" is still a stronger claim than this
+session can make, since a toolchain- or checkpoint-version-level
+difference remains untested and unruled-out. The honest summary, per the
+standard this diagnostic round was held to: this session tested a
+system matching the published one's described geometry and level of
+theory as closely as could be reconstructed, with a validation procedure
+stricter than what the paper's methods section describes, across multiple
+independent starting geometries and constraint mechanisms, and found no
+reachable, geometry-valid spurious minimum for either model.
+
 ## What would still need to happen to give this a final verdict
 
-Check 4 upgrades the conclusion from "we could not find a valid example"
+Check 4 upgraded the conclusion from "we could not find a valid example"
 to "we could not find a valid example, AND we specifically tested whether
 an ordinary minimizer would fall into the broken region from a realistic
-clash and it did not" -- a real, operationally-scoped negative result, not
-just absence of evidence. It does not, however, prove the broken region is
-unreachable from literally any starting point, and the earlier open
-questions about matching the paper's exact setup are still open.
-Concretely untried, in updated priority order given Check 4:
-1. **The paper's own geometries** (was #3, now most valuable given Check
-   4). Unavailable to this session. If Ranasinghe et al.'s SI includes
-   structures (not just energies) for their MACE-OFF23 "spurious minima,"
-   checking those against the same `check_dimer_geometry` gate used here
-   -- and, if reachable, checking whether THEIR reported minimum is
-   downhill-reachable the way Check 4 tests -- would directly settle
-   whether their finding and this session's non-finding are actually in
-   tension, or whether the published minimum is itself in the
-   not-operationally-reachable category this session identified.
-2. **Finer sampling right at the breakdown boundary.** This scan steps in
+clash and it did not." Section 7 upgraded it again: "AND this is not an
+artifact of our idealized starting geometry -- an independently
+reconstructed, literature-informed, DFT-optimized starting point gives
+the same answer." Together these are a real, operationally-scoped
+negative result, not just absence of evidence. What's left is narrower
+than before:
+
+1. **The paper's own geometries** (still the highest-value remaining
+   gap). Unavailable to this session -- checked and confirmed absent from
+   both the paper and its SI (Section 7, Step 1). If Ranasinghe et al.'s
+   raw structures ever become available (e.g. on request from the
+   authors, or a future SI update), checking those against
+   `check_dimer_geometry` and, if reachable, against the Check-4-style
+   basin test, would directly settle whether their finding and this
+   session's non-finding are in real tension or not.
+2. **The exact toolchain.** This session used PySCF (DFT optimization)
+   and ASE+LBFGS (MLIP relaxation) throughout; the paper used ORCA and
+   OpenMM respectively. Section 7 shows the DFT optimizer converges to a
+   sensible, textbook water-dimer minimum regardless (matching energy
+   across two different codes/methods was not tested, but the geometry's
+   textbook parameters -- O-O, H-bond angle, donor O-H elongation -- are a
+   reasonable plausibility check that ORCA would land in the same basin).
+   The bigger unknown is the ML relaxation side: this session's harmonic
+   restraint should be numerically equivalent to OpenMM's, but has not
+   been cross-checked against an actual OpenMM run.
+3. **Finer sampling right at the breakdown boundary.** This scan steps in
    0.1 A increments (matching the paper's stated 0.01 nm). A valid,
    deeper minimum occupying a window narrower than 0.1 A between two
-   sampled points would be invisible here. Given how sharply behavior
-   changed between adjacent 0.1 A points in this data, this is plausible.
-   Somewhat de-prioritized by Check 4: even if such a narrow valid basin
-   exists, Check 4 suggests it would need its OWN separate basin of
+   sampled points would be invisible here. De-prioritized by Check 4: even
+   if such a narrow valid basin exists, it would need its own basin of
    attraction reachable from a realistic clash to be operationally
    relevant, and the tested clashes (1.8, 2.2 A) didn't find one.
-3. **The literal starting geometry.** Ranasinghe et al. start from "the
-   Smith stationary point 1," then a real wB97X/6-31G(d) optimization,
-   vs. this session's hand-built idealized Cs-symmetric guess
-   (`geometry.build_water_dimer`). De-prioritized by Check 4: the
-   unconstrained basin test used THREE different starting geometries
-   (2.9, 2.2, 1.8 A, all independently arrived at via the restrained
-   scan's own optimization history) and got the same outcome every time,
-   which is some evidence the specific starting-geometry choice is not
-   the dominant variable -- though it does not rule out that the ONE
-   specific literature geometry behaves differently.
 4. **More/different unconstrained starting points than Check 4 tried.**
-   Only 1.8, 2.2, and 2.9 A were tested (as requested). Trying additional
-   starting points -- especially ones deliberately constructed to be
-   "close to" the broken region found in Checks 1-3 (e.g. take an
-   invalid, dissociated structure from the restrained scan and release
-   the restraint from THERE, rather than from a valid structure) would
-   more directly test the boundary of the broken region's basin of
-   attraction, rather than only testing "is it reachable from a normal
-   structure."
+   Only 1.8, 2.2, and 2.9 A were tested (as requested), and only from the
+   idealized-guess scan's own checkpoints (Section 7's SP1 reconstruction
+   was not itself re-tested with the Check-4 unconstrained-release
+   protocol). Trying additional starting points -- especially ones
+   deliberately constructed to be "close to" the broken region found in
+   Checks 1-3 (e.g. take an invalid, dissociated structure from the
+   restrained scan and release the restraint from THERE) would more
+   directly test the boundary of the broken region's basin of attraction.

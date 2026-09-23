@@ -26,6 +26,7 @@ dist/
 # re-running, and not needed to interpret results) and generic caches are
 # excluded.
 results/checkpoints/
+results/checkpoints_sp1/
 data/
 .cache/
 *.pt
