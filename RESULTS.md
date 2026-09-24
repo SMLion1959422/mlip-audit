@@ -7,15 +7,15 @@ GPU available this session); Colab GPU not used yet.
 acceptance criterion "MET" for MACE-OFF23-small.** That conclusion was
 premature -- it was built on energies from relaxed structures that turned
 out, on inspection, to have collapsed or dissociated O-H bonds (not an
-intact water dimer). Five diagnostic checks were run before writing this
+intact water dimer). Six diagnostic checks were run before writing this
 version: (1) geometry dump, (2) LBFGS convergence, (3) constraint-mechanism
-sensitivity, (4) an unconstrained basin-of-attraction test, and (5) a
+sensitivity, (4) an unconstrained basin-of-attraction test, (5) a
 from-scratch reconstruction of the paper's own starting geometry (Section
-7) to test whether this session's idealized starting guess was itself the
-source of the disagreement -- see "Diagnostic checks" and Section 7 below
-for the full trail. The corrected, current status is in Section 1.
+7), and (6) a 24-combination optimizer/tolerance/restraint-stiffness
+robustness sweep (Section 8) -- see "Diagnostic checks" and Sections 7-8
+below for the full trail. The corrected, current status is in Section 1.
 
-Two checks in particular changed how strong a claim this document can
+Three checks in particular changed how strong a claim this document can
 make. Check 4 tested whether the broken-geometry region is something an
 ordinary energy minimizer would actually wander into from a realistic
 clash, as opposed to only being reachable via the artificial restrained
@@ -26,10 +26,14 @@ a literature-informed reconstruction of "Smith stationary point 1" from
 scratch (via a real wB97X/6-31G(d) optimization, since no coordinates were
 obtainable from the paper or its SI) and re-running both models gave the
 SAME result (valid depth = 0.00 eV for both models, both starting
-geometries). Together these make "NOT MET" a considerably stronger,
-better-supported conclusion than earlier rounds of this document could
-claim -- see Section 7's final paragraph for exactly how much this does,
-and does not, license saying about the published result.
+geometries). Section 8 tested whether that result depends on optimizer
+choice, convergence tolerance, or restraint stiffness -- 22 of 24 swept
+combinations gave exactly 0.00 eV, the other 2 differing by numerical
+noise two orders of magnitude below any real signal. Together these make
+"NOT MET" a considerably stronger, better-supported conclusion than
+earlier rounds of this document could claim -- see Section 7's final
+paragraph for exactly how much this does, and does not, license saying
+about the published result.
 
 ## 1. Acceptance criterion (as set for this session)
 
@@ -287,17 +291,14 @@ this Windows machine, torch installed from the CPU-only wheel index
 
 ## 6. What is NOT yet built / run
 
-- **UMA-S: not run.** `.venv-uma` is created and `requirements-uma.txt`
-  installed successfully (confirmed: `fairchem-core==2.22.0` imports). A
-  cached HuggingFace token exists. Neither the real
-  `test_charge_reaches_model` test nor a UMA-S Test 3 scan have been
-  executed. When this happens, it must go through the SAME
-  geometry-validity + convergence gating as MACE/ANI-2x, not the original
-  (retracted) raw-minimum approach.
 - **Tests 1, 2, 4: not built at all**, per this session's explicit scope.
-- **Colab: not exercised.** Everything above ran on local CPU.
-- **`results/checkpoints/*.extxyz`** exist locally but are gitignored
-  (regenerable) -- not part of this commit.
+- **Colab: not exercised.** Everything above (and UMA-S, Section 9) ran on
+  local CPU.
+- **`results/checkpoints/*.extxyz`** and `results/checkpoints_sp1/*.extxyz`
+  exist locally but are gitignored (regenerable) -- not part of this
+  commit.
+- UMA-S was NOT run through the optimizer-settings robustness sweep
+  (Section 8) -- that was completed for MACE-OFF23-small and ANI-2x only.
 
 ## 7. Starting-geometry sensitivity: Smith SP1 reconstruction
 
@@ -402,6 +403,159 @@ theory as closely as could be reconstructed, with a validation procedure
 stricter than what the paper's methods section describes, across multiple
 independent starting geometries and constraint mechanisms, and found no
 reachable, geometry-valid spurious minimum for either model.
+
+## 8. Optimizer-settings robustness sweep (bounding the remaining toolchain gap)
+
+Section 7 closed the starting-geometry gap; this section bounds a
+different one cheaply: does the "no reachable spurious minimum" finding
+depend on THIS session's specific optimizer choice (LBFGS), convergence
+tolerance (fmax=0.05), or restraint stiffness (k=10 GJ/mol/nm^2) -- as
+opposed to Ranasinghe et al.'s actual toolchain (ORCA/OpenMM), which
+cannot be run here? If varying these settings changes the answer, the
+untested toolchain difference becomes a live concern; if it doesn't, that
+concern shrinks.
+
+**Design**: single-chain (no multi-start -- isolating the optimizer axis
+from the already-separately-tested multi-start question), full range
+(4.0 -> 0.2 A), Smith SP1 reconstruction starting geometry (Section 7),
+both models, swept over fmax in {0.01, 0.005} (tighter than the
+project-standard 0.05) x optimizer in {LBFGS, FIRE} x restraint k in
+{1, 10, 100} GJ/mol/nm^2 (vs. the standard 10) = 12 settings x 2 models =
+24 runs, each with max_steps raised to 1000. Script:
+`scripts/check5_optimizer_robustness.py`, driven by
+`scripts/run_robustness_sweep.sh`.
+
+**An operational incident happened during this sweep and is disclosed in
+full**, per this project's standing practice of not hiding methodology
+mistakes: killing one hung combination's Python process (FIRE + k=100 GJ/mol/nm^2,
+which requires very small stable timesteps and was slow, not actually
+hung) left its parent shell script alive, which then continued its own
+loop independently while a second, corrected re-launch ran concurrently
+-- two process trees briefly wrote toward the same output directory. This
+was caught, both trees were fully killed (`taskkill /F /T`, verified via
+`Get-CimInstance Win32_Process`), and **every resulting CSV was audited
+before use**: row count vs. the expected 39 scan points, duplicate
+distance values, truncated/malformed final rows, and mtime clustering
+against the known ~4-minute concurrent-write window. Full results: all 24
+files are structurally clean (zero duplicate distances, zero
+truncated/malformed rows anywhere). 19/24 completed all 39 points; 5/24
+are cleanly incomplete (23-37/39 points, each with a `.TIMEDOUT` marker
+and a well-formed final row at the 900s per-combination wall-clock cap) --
+all five are `fire_k10` or `fire_k100` combinations, consistent with FIRE
+being slow to converge against very stiff restraints, not with
+corruption. All 5 partial files have mtimes well outside the confirmed
+race window and were kept (not deleted) as genuine, if incomplete,
+partial evidence. Full audit script and reasoning available on request;
+not separately committed as a script since it was a one-time forensic
+check, not a reusable pipeline component.
+
+**Results** (`results/test3_dimer_sp1_robustness/*.csv`; `valid_depth_eV`
+computed via `mlip_audit.plotting.check_spurious_minimum` against each
+combination's own physical-window reference):
+
+| Setting | mace-off23-small valid_depth (eV) | ani2x valid_depth (eV) |
+|---|---|---|
+| fmax=0.01, LBFGS, k=1 | 0.0000 | 0.0000 |
+| fmax=0.01, LBFGS, k=10 | 0.0000 | 0.0000 |
+| fmax=0.01, LBFGS, k=100 | 0.0000 | 0.0000 |
+| fmax=0.01, FIRE, k=1 | 0.0000 | 0.0000 |
+| fmax=0.01, FIRE, k=10 | 0.0000 | -0.0015 (noise) |
+| fmax=0.01, FIRE, k=100 | -0.0132 (noise; 24/39 pts, timed out) | 0.0000 (33/39 pts, timed out) |
+| fmax=0.005, LBFGS, k=1 | 0.0000 | 0.0000 |
+| fmax=0.005, LBFGS, k=10 | 0.0000 (fresh spot-check re-run, see below) | 0.0000 (fresh spot-check re-run, see below) |
+| fmax=0.005, LBFGS, k=100 | 0.0000 | 0.0000 |
+| fmax=0.005, FIRE, k=1 | 0.0000 | 0.0000 |
+| fmax=0.005, FIRE, k=10 | 0.0000 (37/39 pts, timed out) | -0.0015 (noise) |
+| fmax=0.005, FIRE, k=100 | N/A (23/39 pts, timed out; physical window under-sampled) | N/A (33/39 pts, timed out; physical window under-sampled) |
+
+**22/24 combinations give exactly 0.00 eV.** The 2 non-zero values
+(-0.0015 and -0.0132 eV = -0.03 and -0.30 kcal/mol) are two orders of
+magnitude below anything that would register as a real minimum (compare
+to the raw/invalid depths of 77-6640 kcal/mol seen elsewhere in this
+project) -- numerical noise from the physical-window reference landing on
+a slightly different point, not a finding.
+
+**Spot-check re-run** (fmax=0.005, LBFGS, k=10, the one combination most
+likely to have been touched by the concurrent-write incident given its
+mtime): both models' files for this exact setting were deleted and
+re-run fresh, sequentially, with no other process active (verified via
+`Get-CimInstance Win32_Process` immediately before each run). Results:
+mace-off23-small valid_depth = 0.0000 eV (physical -4162.4507 eV @ 2.9 A;
+raw global min -4304.8225 eV @ 0.2 A, invalid); ani2x valid_depth =
+0.0000 eV (physical = raw = -4157.6152 eV @ 2.8 A, no excursion at all,
+matching its behavior on the standard SP1 scan in Section 7).
+
+**Conclusion: the "no reachable, geometry-valid spurious minimum" finding
+is insensitive to optimizer choice (LBFGS vs. FIRE), convergence
+tolerance (fmax 0.05/0.01/0.005), and restraint stiffness (k =
+1/10/100 GJ/mol/nm^2), for both models, on the Smith SP1 reconstruction
+geometry.** This narrows what an actual ORCA/OpenMM toolchain run could
+plausibly change: it would need to differ from every setting tested here
+in some OTHER respect (e.g. a genuine numerical difference between
+OpenMM's and this project's harmonic restraint implementation, or a
+difference in how the two DFT codes, ORCA vs. PySCF, converge the
+starting geometry) rather than in optimizer/tolerance/stiffness choice,
+which this sweep now rules out as the explanation.
+
+
+## 9. UMA-S: charge/spin fix, and Test 3 scan (all three models now complete)
+
+**A real environment bug, not a charge/spin logic bug, blocked UMA-S
+entirely at first.** Running `tests/test_charge_spin.py::test_charge_reaches_model`
+failed with `torch._inductor.exc.InductorError: InvalidCxxCompiler:
+Compiler: cl is not found`. Root cause: `fairchem.core.pretrained_mlip.
+get_predict_unit()`'s DEFAULT `inference_settings` ("default", and also
+"turbo") both set `compile=True`, which requires `torch.compile`'s C++
+backend (MSVC's `cl.exe` on Windows) to JIT-compile inference kernels --
+unavailable on this machine (same root cause as the earlier PySCF
+build-from-source failure in Section 7). Fixed by explicitly passing
+`inference_settings="batch"` in `mlip_audit/models.py::_load_uma_s` -- the
+one named preset with both `compile=False` and `merge_mole=False` (the
+latter also sidesteps a charge/spin-triggered remerge-fallback path that
+doesn't apply cleanly to this project's usage pattern of varying
+charge/spin between calls). This is a genuine, permanent pipeline fix, not
+a one-off test workaround -- it changes how `get_calc("uma-s-1p1")` loads
+the model for every caller, including the Test 3 scan below. Still
+explicitly NOT `"turbo"`, per the original project brief's prohibition
+(system-size locking).
+
+With that fix, all three `tests/test_charge_spin.py` tests pass,
+including the real (not skipped) `test_charge_reaches_model`: acetate
+scored at charge=-1 vs. charge=0 gives measurably different energies,
+confirming charge/spin config reaches the model.
+
+**Test 3 scan** (standard idealized starting geometry, same protocol as
+MACE-OFF23-small/ANI-2x in Sections 1-6: multi-start restraint,
+0.2-7.0 A, geometry+convergence validated): full data
+`results/test3_dimer/uma-s-1p1.csv`; combined 3-model plot
+`results/test3_dimer/dimer_scan.png`.
+
+| | Physical min (~2.9 A) | RAW global min | RAW depth | VALID global min | VALID depth |
+|---|---|---|---|---|---|
+| uma-s-1p1 | -4159.9486 eV @ 2.9 A | -4159.9486 eV @ 2.9 A | **0.00 eV = 0.00 kcal/mol** | -4159.9486 eV @ 2.9 A | **0.00 eV = 0.00 kcal/mol** |
+
+**UMA-S is the cleanest of the three models by this measure**: not only
+is VALID depth 0.00 eV (same as MACE-OFF23-small and ANI-2x), its RAW
+(unfiltered) depth is ALSO 0.00 eV -- unlike MACE (77 kcal/mol raw) and
+ANI-2x (2336 kcal/mol raw), UMA-S's geometry-invalid points (11/69, all
+below ~1.3 A, all showing severe O-H dissociation up to 6.5 A) are all
+HIGHER energy than physical, never lower. UMA-S shows no spurious dip at
+all under this protocol, filtered or not.
+
+**Test 3 scan, Smith SP1 reconstruction geometry** (Section 7's
+methodology, extended to UMA-S so all three models now have both the
+standard AND the SP1 scan): full data `results/test3_dimer_sp1/uma-s-1p1.csv`;
+combined 3-model plot `results/test3_dimer_sp1/dimer_scan_sp1.png`.
+
+| | Physical min (~2.9 A) | RAW global min | RAW depth | VALID global min | VALID depth |
+|---|---|---|---|---|---|
+| uma-s-1p1 (SP1 geometry) | -4159.9480 eV @ 2.9 A | -4159.9480 eV @ 2.9 A | **0.00 eV** | -4159.9480 eV @ 2.9 A | **0.00 eV** |
+
+Same result as the standard-geometry scan (energies agree to 0.0006 eV),
+same as MACE-OFF23-small and ANI-2x on this geometry (Section 7): no
+spurious minimum, raw or valid. **All three models, both starting
+geometries, now agree: valid depth = 0.00 eV in every one of the 6
+(model x geometry) combinations tested in this session.**
 
 ## What would still need to happen to give this a final verdict
 

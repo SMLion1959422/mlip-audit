@@ -107,7 +107,25 @@ def _load_uma_s(device: str) -> "Calculator":
     # locks the predictor to the first system size it sees and silently
     # produces wrong energies for any differently-sized structure evaluated
     # later in the same process -- which every one of our scans/tests does.
-    predictor = pretrained_mlip.get_predict_unit("uma-s-1p1", device=device)
+    #
+    # ALSO IMPORTANT (found running this project on Windows/CPU): the
+    # DEFAULT inference_settings ("default", and "turbo" too) both set
+    # compile=True, which requires torch.compile's C++ backend (MSVC's
+    # cl.exe on Windows) to JIT-compile inference kernels. On a machine
+    # without a C/C++ compiler toolchain, this raises
+    # torch._inductor.exc.InductorError: InvalidCxxCompiler at first
+    # inference, not at import/load time. "batch" is the one named preset
+    # with compile=False AND merge_mole=False (merge_mole assumes fixed
+    # composition/charge/spin across calls -- safe via auto-fallback when
+    # those change, per fairchem's own docs, but "batch" sidesteps that
+    # entirely, which is simpler to reason about given every test/scan in
+    # this project varies charge/spin and/or geometry between predictor
+    # calls). If running on a GPU machine with a working compiler, "batch"
+    # is still a safe, correct default -- it is simply not the fastest
+    # available option; revisit if inference speed becomes a bottleneck.
+    predictor = pretrained_mlip.get_predict_unit(
+        "uma-s-1p1", device=device, inference_settings="batch"
+    )
     return FAIRChemCalculator(predictor, task_name="omol")
 
 
