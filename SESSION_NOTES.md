@@ -23,9 +23,27 @@ something changes.
   `test2_md_stability.py`, `test4_condensed_water.py`; new stack
   `requirements-md.txt` / `bash setup.sh md` (unified env, all 4 models --
   torchani and fairchem-core do NOT conflict, unlike mace-torch).
+  **Test 2's molecule was later revised**: it now uses the paper's ACTUAL
+  349-atom drug-like benchmark molecule (exact SMILES recovered from the
+  paper's SI, RDKit-validated to the paper's stated atom
+  count/formula/elements), not the earlier 4-small-molecule substitute
+  (ethanol/THF/phenol/ala-dipeptide) -- that substitute is fully
+  superseded and gone from the code. See
+  `scripts/build_drug_like_benchmark_geometry.py`,
+  `geometries/drug_like_benchmark_349atoms.xyz`, and RESULTS.md's "Test 2
+  molecule: SMILES provenance and verification" section. Test 2 is now 1
+  molecule x 4 models x 1 seed x 100 ps (was 4 molecules x 4 models x 2
+  seeds). ANI-2x's element support for this molecule (H, C, N, O, S, F,
+  Cl) was directly verified (the paper notes ANI-1ccx, a DIFFERENT older
+  model, cannot run it) -- both ANI-2x and UMA-S ran real single-point
+  evaluations on it successfully; eSEN-conserving/eSEN-direct were not
+  independently spot-checked (same fairchem infrastructure assumed, not
+  verified).
 
 - Repo scaffold, model-loading harness (`mlip_audit/models.py`), and
-  Test 3 (`mlip_audit/test3_dimer.py`) are built and working.
+  Test 3 (`mlip_audit/test3_dimer.py`) are built and working. **Test 3 is
+  now complete for all three models** (MACE-OFF23-small, ANI-2x, UMA-S) --
+  see next two bullets and `RESULTS.md` Section 9.
 - MACE-OFF23-small's and ANI-2x's Test 3 scans are DONE, and both went
   through a rigorous geometry-validity + convergence diagnostic (FIVE
   checks across three rounds: geometry dump, force-convergence,
@@ -49,11 +67,16 @@ something changes.
   was wrong and has been explicitly retracted. If you find any other
   document, comment, or cached belief claiming "MACE acceptance criterion
   MET," it is stale -- `RESULTS.md`'s current text is the source of truth.
-- UMA-S: environment is ready (`.venv-uma`, see below) but NOTHING has
-  been run yet -- no charge/spin test, no Test 3 scan. This is the most
-  concrete unstarted piece of work, AND it must go through the same
-  geometry/convergence gating from the start (don't repeat the mistake of
-  reading off a raw minimum) -- see "Immediate next steps" below.
+- UMA-S: charge/spin test and Test 3 scan are DONE (`.venv-uma`, see
+  below). Loading UMA-S required a real environment fix, not a logic fix
+  -- `inference_settings="batch"` instead of the default (which needs
+  `torch.compile`'s C++ backend, unavailable on this machine); this
+  changed `get_calc("uma-s-1p1")` for every caller. With that fix, all
+  charge/spin tests pass, and UMA-S's Test 3 scan (both the standard
+  geometry and the Smith SP1 reconstruction) shows valid depth = 0.00 eV,
+  same conclusion as MACE-OFF23-small and ANI-2x. See `RESULTS.md`
+  Section 9: **all three models, both starting geometries, now agree --
+  valid depth = 0.00 eV in all 6 (model x geometry) combinations.**
 
 ## Two environments -- do not `pip install` both stacks into one venv
 
@@ -100,37 +123,22 @@ Windows-specific memory bug it works around.
 
 ## Immediate next steps, in priority order
 
-1. **Run the real UMA-S charge/spin test.**
-   ```bash
-   cd /c/Users/srika/Documents/mlip-audit && source .venv-uma/Scripts/activate
-   python -m pytest tests/test_charge_spin.py -v
-   ```
-   A cached HuggingFace token already exists on this machine -- if this
-   session's login has expired or you're on a different machine, run
-   `hf auth login` first and make sure the gated UMA model license has
-   been accepted on huggingface.co for that account. If
-   `test_charge_reaches_model` fails (not skips) STOP and debug the
-   `FAIRChemCalculator`/`atoms.info` wiring in `mlip_audit/models.py`
-   before trusting anything else UMA-related.
+1. **Run Tests 2 & 4 at full scale on Colab** -- this is the actual
+   remaining deliverable. `notebooks/02_md_tests.ipynb` is the driver;
+   both tests are resumable/checkpointed to Google Drive. Test 2 is now 1
+   molecule (the real 349-atom benchmark) x 4 models x 1 seed x 100 ps;
+   Test 4 is 168 waters x 4 models x (125 ps NVT + 50 ps NPT). Read
+   `RESULTS.md`'s "Test 2 and Test 4" section (deviations table +
+   provenance/verification sections) before running. Record results in
+   `RESULTS.md`'s Test 2/4 section by hand once a run completes, same as
+   every other result in this project.
 
-2. **Run UMA-S's Test 3 scan**, then its plot/analysis:
-   ```bash
-   python -m mlip_audit.test3_dimer --model uma-s-1p1 --device cpu --no-resume --verbose
-   python -m mlip_audit.plotting --csv results/test3_dimer/*.csv
-   ```
-   The pipeline already includes geometry-validity gating and correct
-   live convergence capture (both were bugs fixed THIS session -- see
-   `RESULTS.md` Section 4), so UMA-S's numbers should come out trustworthy
-   without extra work. Still: look at the `geometry_valid` column and the
-   raw-vs-valid depth numbers before writing anything about UMA-S's
-   result. Record it in `RESULTS.md` as a new section, whatever it shows.
-
-3. **Close the open gaps listed in `RESULTS.md`'s "What would still need
-   to happen" section** -- re-prioritized after Check 4 AND Section 7 (the
-   Smith SP1 reconstruction, which closed the "literal starting geometry"
-   gap as far as this session can), in order: (a) the paper's own raw
-   structures, if ever obtainable (e.g. by contacting the authors) --
-   still THE highest-value remaining gap, since this session can now only
+2. **Close the open gaps listed in `RESULTS.md`'s "What would still need
+   to happen" section** (Test 3, now fully closed out for all 3 models --
+   this is about tightening the remaining bound, not required for the
+   core deliverable), in order: (a) the paper's own raw structures, if
+   ever obtainable (e.g. by contacting the authors) -- still THE
+   highest-value remaining gap, since this session can now only
    reconstruct, not obtain, their geometry, and a direct check would
    settle things outright; (b) cross-checking this session's harmonic
    restraint against an actual OpenMM run, since the paper used OpenMM and
@@ -143,12 +151,11 @@ Windows-specific memory bug it works around.
    with the Check-4 unconstrained-release protocol) and from
    already-invalid (dissociated) structures rather than only valid ones.
 
-4. **Tests 1, 2, 4** -- out of scope for this session by explicit
-   instruction; don't start these without being asked.
+3. **Test 1** -- still out of scope by explicit instruction; don't start
+   without being asked.
 
-5. **Try the notebook on actual Colab** at some point -- it's never been
-   run there, only reasoned about. The Part A / Part B split (for the
-   two-environment issue) in particular is untested.
+4. **Try the notebooks on actual Colab** at some point -- neither has
+   ever been run there, only reasoned about and locally smoke-tested.
 
 ## Things a fresh session might get wrong if it doesn't read this file
 
