@@ -7,6 +7,23 @@ something changes.
 
 ## Where things stand right now
 
+- **Tests 2 & 4 (MD stability, condensed-phase water): infrastructure
+  built, locally smoke-tested at tiny scale, NOT YET RUN at full scale.**
+  This is new, separate scope from Test 3 -- explicitly authorized
+  mid-session with a 177-compute-unit Colab budget, 4 models (UMA-S,
+  eSEN-conserving, eSEN-direct, ANI-2x), and an explicit deviations-table
+  requirement. See `RESULTS.md`'s "Test 2 and Test 4" section (full
+  deviations table + 2 real bugs found/fixed during smoke-testing:
+  velocity-carryover between NVT->NPT, and an off-by-one in the resume
+  logic that silently truncated every resumed run by one checkpoint
+  interval -- both fixed and re-verified, but neither test has actually
+  been run at real scale yet, so there is NO result to report for either
+  test.** Next step: run `notebooks/02_md_tests.ipynb` on Colab. New
+  modules: `molecules.py`, `md_common.py`, `md_analysis.py`,
+  `test2_md_stability.py`, `test4_condensed_water.py`; new stack
+  `requirements-md.txt` / `bash setup.sh md` (unified env, all 4 models --
+  torchani and fairchem-core do NOT conflict, unlike mace-torch).
+
 - Repo scaffold, model-loading harness (`mlip_audit/models.py`), and
   Test 3 (`mlip_audit/test3_dimer.py`) are built and working.
 - MACE-OFF23-small's and ANI-2x's Test 3 scans are DONE, and both went

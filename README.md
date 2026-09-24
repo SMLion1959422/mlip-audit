@@ -5,39 +5,53 @@ potentials (Meta's UMA and eSEN family, plus ANI-2x and MACE-OFF23 as
 comparison points), following the four-test protocol of Ranasinghe et al.
 2025 (JCIM 65(17), 8980-8999; preprint arXiv:2503.11537).
 
-**This session's scope:** repo scaffold, model-loading harness, and **Test 3
-only** (water dimer O-O potential energy scan). Tests 1, 2, and 4 are not
-implemented yet.
+**Scope:** repo scaffold, model-loading harness, **Test 3** (water dimer
+O-O potential energy scan -- complete for all 5 models, see `RESULTS.md`),
+and **Tests 2 & 4** (short-MD molecular stability; condensed-phase water --
+infrastructure built and locally smoke-tested, full-scale runs pending on
+Colab, see `RESULTS.md`'s "Test 2 and Test 4" section and
+`notebooks/02_md_tests.ipynb`). Test 1 is not implemented.
 
 ## Models
 
-| Key | Loaded via | Trained/reference level of theory |
-|---|---|---|
-| `ani2x` | `torchani.models.ANI2x().ase()` | wB97X/6-31G(d) |
-| `mace-off23-small` | `mace.calculators.mace_off(model="small")` | wB97M-D3(BJ)/def2-TZVPPD |
-| `uma-s-1p1` | `fairchem.core.pretrained_mlip` + `FAIRChemCalculator` | wB97M-V/def2-TZVPD |
+| Key | Loaded via | Trained/reference level of theory | Used in |
+|---|---|---|---|
+| `ani2x` | `torchani.models.ANI2x().ase()` | wB97X/6-31G(d) | Tests 2, 3, 4 |
+| `mace-off23-small` | `mace.calculators.mace_off(model="small")` | wB97M-D3(BJ)/def2-TZVPPD | Test 3 |
+| `uma-s-1p1` | `fairchem.core.pretrained_mlip` + `FAIRChemCalculator` | wB97M-V/def2-TZVPD | Tests 2, 3, 4 |
+| `esen-conserving` | fairchem, checkpoint `esen-sm-conserving-all-omol` | wB97M-V/def2-TZVPD (assumed, same as UMA) | Tests 2, 4 |
+| `esen-direct` | fairchem, checkpoint `esen-sm-direct-all-omol` | wB97M-V/def2-TZVPD (assumed, same as UMA) | Tests 2, 4 |
 
-All three are wrapped behind one factory, `mlip_audit.models.get_calc(name)`,
+All five are wrapped behind one factory, `mlip_audit.models.get_calc(name)`,
 so test code never branches on model identity. Reference levels are recorded
 in `mlip_audit/config.py` for later tests that compare each model against
 its *own* training level (Test 3 doesn't use this yet).
 
-## Important: two separate environments, not one
+## Important: environments (three stacks, not one)
 
 `mace-torch` (every release up to and including the current 0.3.10) hard-pins
-`e3nn==0.4.4`. `fairchem-core` (required for UMA-S) requires `e3nn>=0.5`.
+`e3nn==0.4.4`. `fairchem-core` (required for UMA-S/eSEN) requires `e3nn>=0.5`.
 These conflict for real -- `pip install mace-torch fairchem-core` together
 is `ResolutionImpossible`, confirmed against current PyPI releases of both,
-not a range we guessed at. There is no single environment that can run all
-three models.
+not a range we guessed at. There is no single environment that can run
+MACE-OFF23-small alongside UMA-S/eSEN.
 
-**Consequence:** run ANI-2x + MACE-OFF23-small in one environment/Colab
-session, and UMA-S in a separate one. `setup.sh` takes a stack argument to
-make this explicit:
+**Consequence for Test 3** (which uses MACE-OFF23-small): run ANI-2x +
+MACE-OFF23-small in one environment/Colab session, and UMA-S in a separate
+one. `setup.sh` takes a stack argument to make this explicit:
 
 ```bash
-bash setup.sh ani-mace   # installs requirements-ani-mace.txt
-bash setup.sh uma        # installs requirements-uma.txt (separate env/runtime)
+bash setup.sh ani-mace   # installs requirements-ani-mace.txt (Test 3: ANI-2x, MACE-OFF23-small)
+bash setup.sh uma        # installs requirements-uma.txt (Test 3: UMA-S, separate env/runtime)
+```
+
+**Tests 2 and 4** don't use MACE-OFF23-small at all (their 4 models are
+UMA-S, eSEN-conserving, eSEN-direct, ANI-2x), so the conflict above never
+arises for them -- `torchani` and `fairchem-core` install together into
+ONE environment with no issue (verified). Use the third stack:
+
+```bash
+bash setup.sh md         # installs requirements-md.txt (Tests 2 & 4: all 4 models, one env)
 ```
 
 ## Setup
@@ -181,20 +195,51 @@ This test is skipped (not failed) if UMA can't be loaded in the current
 environment (no GPU, no HF login, no network) -- that's an environment
 gap, not a code failure.
 
+## Running Tests 2 & 4
+
+**Read `RESULTS.md`'s "Test 2 and Test 4" section first** -- it has the
+full deviations table (shortened production lengths, no solute in Test 4,
+`inference_settings="turbo"`'s untested-outside-Colab status, etc.) and
+current status (infrastructure built + locally smoke-tested; no full-scale
+run yet). Use the `md` environment stack (see above), then:
+
+```bash
+# Test 2: short-MD stability, 4 molecules x 4 models x 2 seeds x 100 ps.
+python -m mlip_audit.test2_md_stability --verbose
+# subset: --molecule ethanol --model uma-s-1p1 --seed 0
+
+# Test 4: condensed-phase water, 4 models x (125 ps NVT + 50 ps NPT).
+python -m mlip_audit.test4_condensed_water --verbose
+# subset: --model uma-s-1p1 --phase nvt
+```
+
+Both are resumable the same way Test 3 is (re-running the same command
+picks up from the last checkpoint) -- see `notebooks/02_md_tests.ipynb`
+for the full Colab driver, including mounting Google Drive for
+`MLIP_AUDIT_MD_ROOT` so checkpoints survive a runtime disconnect.
+
 ## Repo layout
 
 ```
 mlip_audit/
-  config.py       reference DFT levels, paths, scan/optimizer constants
-  models.py       get_calc() factory + charge/spin wiring
-  geometry.py     water dimer builder + O-O distance utilities
-  test3_dimer.py  the resumable scan -> CSV
-  plotting.py     log-scale plot + spurious-minimum check
+  config.py             reference DFT levels, paths, all tests' constants
+  models.py             get_calc() factory (5 models) + charge/spin wiring
+  geometry.py            water dimer builder + O-O distance utilities (Test 3)
+  restraints.py           harmonic distance restraint (Test 3)
+  test3_dimer.py          the resumable O-O scan -> CSV
+  plotting.py             Test 3 log-scale plot + spurious-minimum check
+  molecules.py             Test 2/4 molecule + water-box builders
+  md_common.py             resumable MD driver (checkpointing, Test 2/4)
+  md_analysis.py           bond-length stability (Test 2) + O-O RDF (Test 4)
+  test2_md_stability.py    Test 2 driver
+  test4_condensed_water.py Test 4 driver
 tests/
   test_charge_spin.py
 notebooks/
-  01_dimer_scan.ipynb
-results/           gitignored: CSVs, checkpoints, plots land here
+  01_dimer_scan.ipynb   Test 3 Colab driver
+  02_md_tests.ipynb     Tests 2 & 4 Colab driver
+scripts/                 one-off diagnostic/investigation scripts (see RESULTS.md)
+results/                  gitignored: CSVs, checkpoints, plots land here
 ```
 
 ## Known limitations of this session's build

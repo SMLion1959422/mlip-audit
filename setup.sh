@@ -3,32 +3,40 @@
 # or a fresh local machine with a POSIX shell (Linux/macOS/Git-Bash-on-Windows).
 #
 # Usage:
-#   bash setup.sh ani-mace     # installs ANI-2x + MACE-OFF23-small stack
-#   bash setup.sh uma          # installs UMA-S stack
+#   bash setup.sh ani-mace     # installs ANI-2x + MACE-OFF23-small stack (Test 3 only)
+#   bash setup.sh uma          # installs UMA-S stack (Test 3 only)
+#   bash setup.sh md           # installs UMA-S + eSEN + ANI-2x + RDKit (Tests 2 and 4)
 #
-# Why two stacks: mace-torch hard-pins e3nn==0.4.4; fairchem-core (needed
-# for UMA-S) requires e3nn>=0.5. These conflict for real -- not just a
-# slow pip resolution -- across all current releases of both packages. You
-# cannot pip-install mace-torch and fairchem-core into the same
-# environment. See requirements.txt for details. In practice this means:
-# run ANI-2x/MACE-OFF23 Test 3 scans in one environment (or Colab runtime),
-# and UMA-S scans in another.
+# Why "ani-mace"/"uma" are separate (Test 3 only): mace-torch hard-pins
+# e3nn==0.4.4; fairchem-core (needed for UMA-S) requires e3nn>=0.5. These
+# conflict for real -- not just a slow pip resolution -- across all current
+# releases of both packages. You cannot pip-install mace-torch and
+# fairchem-core into the same environment. See requirements.txt.
+#
+# Why "md" is its own (single, unified) stack: Tests 2 and 4 use UMA-S,
+# eSEN-conserving, eSEN-direct, and ANI-2x -- NOT MACE-OFF23, so the
+# mace-torch/fairchem-core conflict above never arises. torchani (ANI-2x)
+# and fairchem-core (UMA/eSEN) do NOT conflict with each other (verified by
+# installing both together) -- so unlike Test 3, Tests 2/4 need only ONE
+# environment for all four of their models.
 #
 # What this does NOT do: it does not touch HuggingFace credentials. Run
 # `hf auth login` yourself (interactively, so the token isn't captured in
-# any log) before running Test 3 with UMA-S. See README.md.
+# any log) before running anything that touches UMA-S or eSEN. See README.md.
 
 set -euo pipefail
 
 STACK="${1:-}"
-if [[ "$STACK" != "ani-mace" && "$STACK" != "uma" ]]; then
-    echo "Usage: bash setup.sh {ani-mace|uma}"
+if [[ "$STACK" != "ani-mace" && "$STACK" != "uma" && "$STACK" != "md" ]]; then
+    echo "Usage: bash setup.sh {ani-mace|uma|md}"
     echo ""
-    echo "  ani-mace  -- installs ANI-2x + MACE-OFF23-small (requirements-ani-mace.txt)"
-    echo "  uma       -- installs UMA-S (requirements-uma.txt)"
+    echo "  ani-mace  -- ANI-2x + MACE-OFF23-small, Test 3 only (requirements-ani-mace.txt)"
+    echo "  uma       -- UMA-S, Test 3 only (requirements-uma.txt)"
+    echo "  md        -- UMA-S + eSEN-conserving + eSEN-direct + ANI-2x, Tests 2 and 4 (requirements-md.txt)"
     echo ""
-    echo "These are separate environments because mace-torch and fairchem-core"
-    echo "have a genuine, unresolvable e3nn version conflict. See requirements.txt."
+    echo "ani-mace/uma are separate because mace-torch and fairchem-core have a"
+    echo "genuine, unresolvable e3nn version conflict. md doesn't use MACE, so it"
+    echo "doesn't hit that conflict and is a single unified stack. See requirements.txt."
     exit 1
 fi
 
@@ -56,14 +64,14 @@ pip install -r "requirements-${STACK}.txt"
 pip install -e .
 
 echo ""
-if [[ "$STACK" == "uma" ]]; then
-    echo "== Checking HuggingFace login (required for UMA-S) =="
+if [[ "$STACK" == "uma" || "$STACK" == "md" ]]; then
+    echo "== Checking HuggingFace login (required for UMA-S / eSEN) =="
     if python -c "from huggingface_hub import get_token; import sys; sys.exit(0 if get_token() else 1)" 2>/dev/null; then
         echo "HuggingFace token found via huggingface_hub cache. OK."
     else
         echo "No cached HuggingFace token found."
         echo "Run:  hf auth login"
-        echo "(then accept the gated UMA model license at huggingface.co before using uma-s-1p1)"
+        echo "(then accept the gated UMA/eSEN model licenses at huggingface.co)"
     fi
 fi
 
@@ -76,6 +84,9 @@ echo "Setup complete ($STACK stack). Try:"
 if [[ "$STACK" == "uma" ]]; then
     echo "  python -m pytest tests/test_charge_spin.py -v"
     echo "  python -m mlip_audit.test3_dimer --model uma-s-1p1"
+elif [[ "$STACK" == "md" ]]; then
+    echo "  python -m mlip_audit.test2_md_stability --molecule ethanol --model ani2x --seed 0"
+    echo "  python -m mlip_audit.test4_condensed_water --model ani2x --phase nvt"
 else
     echo "  python -m mlip_audit.test3_dimer --model mace-off23-small"
     echo "  python -m mlip_audit.test3_dimer --model ani2x"

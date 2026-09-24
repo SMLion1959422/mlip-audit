@@ -603,3 +603,150 @@ than before:
    Checks 1-3 (e.g. take an invalid, dissociated structure from the
    restrained scan and release the restraint from THERE) would more
    directly test the boundary of the broken region's basin of attraction.
+
+---
+
+# Test 2 and Test 4: MD stability and condensed-phase water
+
+**Status: infrastructure built and locally smoke-tested (tiny scale, CPU)
+-- NOT YET RUN AT FULL SCALE.** Full-scale runs (100 ps x 4 molecules x 2
+seeds for Test 2; 175 ps x 504 atoms for Test 4, x4 models each) are
+computationally infeasible on this session's local CPU-only machine and
+are explicitly scoped as Colab GPU work (per the 177-compute-unit budget
+given for this work). This section documents what was built, the bugs
+found and fixed while smoke-testing it, and every deviation from
+Ranasinghe et al.'s actual protocol, with justification, per instruction.
+
+## Reference protocol (Ranasinghe et al. 2025, re-extracted from the paper for precision)
+
+**Test 2 (paper Sec. 2.2.2, main text)**: ONE artificial 349-atom
+drug-like benchmark molecule (a composite of clarithromycin,
+dexamethasone, diazepam, morphine, penicillin, sildenafil, and tryptophan
+dipeptide fragments) -- NOT the 4 molecules used this session. 400 K,
+Langevin (friction 1 ps^-1), 1.0 fs timestep, 0.25 ns (250 ps) production
+(MACE M/L only reached 0.174/0.041 ns in 24h -- a real data point on this
+class of test's compute cost), trajectory saved every 0.5 ps, LBFGS
+geometry optimization before each model's MD run, bond-length/bond-angle
+distributions analyzed via MDTraj + quasi-harmonic analysis.
+
+**Test 2's molecules, actually a different paper test**: the paper
+separately describes (SI, "Further quasi-harmonic analysis tests") a set
+of "14 simple benchmark systems... water, ethane, methanol, methanethiol,
+ethanol, acetamide, tetrahydrofuran, n-hexane, cyclohexane, benzene,
+phenol, aniline, N-acetyl-alanine-methylamide, and
+N-acetyl-serine-methylamide," run at the SAME simulation parameters (400 K
+/ Langevin 1 ps^-1 / 1.0 fs / 0.25 ns) as the main 349-atom test. This
+session's 4 molecules (ethanol, THF, phenol, ala-dipeptide) are a subset
+of THIS 14-molecule list, not of the 349-atom test -- worth being precise
+about, since these are two different tests in the paper with the same
+simulation parameters but different molecules and different purposes
+(main stability test vs. quasi-harmonic frequency analysis).
+
+**Test 4 (paper Sec. 2.3)**: 168 TIP3P water molecules PLUS a SOLUTE,
+prepared classically (MM, 0.5 ns equilibration to a 1.706 nm box), PME
+electrostatics (8 A cutoff), SETTLE-constrained rigid water. "Before each
+ML simulation, the geometry of the SOLUTE was optimized," then 125 ps NVT
+equilibration, then 0.125 ns (125 ps) NPT production, 300 K (Nose-Hoover
+thermostat), 1 bar (Monte Carlo barostat), 0.5 fs timestep, trajectory
+saved every 0.5 ps, RDFs via MDTraj.
+
+## Deviations table
+
+| Parameter | Ranasinghe et al. | This session | Justification |
+|---|---|---|---|
+| **Test 2 molecule(s)** | ONE 349-atom composite drug-like molecule (main test); separately, 14 simple molecules incl. ethanol/THF/phenol/ala-dipeptide (SI quasi-harmonic test, same sim. params) | 4 molecules: ethanol, THF, phenol, ala-dipeptide (subset of the paper's OWN 14-molecule SI list) | Compute budget: the 349-atom test is far outside a 177-CU Colab budget across 4 models x 2 seeds; the paper's own SI subset is a validated, much cheaper alternative testing the same physics (bond/angle stability) on real, if smaller, molecules the paper itself used. |
+| **Test 2 seeds** | not specified (presumably 1 run per model) | 2 seeds per (molecule, model) | Session choice, to distinguish a genuine model instability from a single unlucky velocity draw. Not a paper value to deviate from -- new. |
+| **Test 2 length** | 0.25 ns (250 ps) | 100 ps | **Compute-limited, disclosed limitation** (explicit instruction: not to be silently adopted). 40% of the paper's length; some instabilities the paper reports only emerging late in a 250 ps run could be missed here. |
+| **Test 2 timestep** | 1.0 fs | 1.0 fs | Matches. |
+| **Test 2 temperature / thermostat** | 400 K, Langevin, friction 1 ps^-1 | 400 K, Langevin, friction 1 ps^-1 | Matches. |
+| **Test 2 models** | ANI-2x, MACE-OFF23 (S/M/L/XS variants), B97-3c-family in-house models -- NOT UMA/eSEN (postdate the paper) | UMA-S, eSEN-conserving, eSEN-direct, ANI-2x (control) | Project scope from the start of this session: auditing OMol25-generation models (UMA, eSEN), which did not exist when the paper was written. ANI-2x included as a non-fairchem control, matching its role throughout this project. |
+| **Test 4 solute** | a solute molecule embedded in the water box; the ML potential's role includes describing (at least) the solute | **NONE -- pure water box, ML potential describes all 504 atoms** | **Substantive deliberate simplification, disclosed**: no specific solute was given in this session's scope; testing a pure water box directly probes each model's description of water-water interactions in isolation (matching the paper's own RESULTS-section framing -- "water-water interactions are the driving force of the hydrophobic effect... ML potentials will still have to improve" -- and its RDF-based water-structure analysis), without a confounding solute-specific effect. This is NOT equivalent to the paper's literal Test 4 setup and should not be cited as reproducing it. |
+| **Test 4 box construction** | OpenMM MM equilibration (0.5 ns) with TIP3P + PME + SETTLE | Grid-packing (see `mlip_audit/molecules.py::build_water_box`) at matching initial density; box side (17.13 A) matches the paper's reported 17.06 A closely | No packmol/OpenMM available in this environment. Grid-packing is only a REASONABLE starting configuration -- the protocol's own 125 ps NVT equilibration is what's supposed to relax it, same role the paper's box serves before ML production. |
+| **Test 4 electrostatics/constraints** | PME (8 A cutoff), SETTLE-rigid water | None -- direct ML potential forces on all atoms, no long-range electrostatic scheme, no rigid-water constraint | The ML potentials (UMA/eSEN/ANI) compute total energy/forces directly from local+message-passing environments, not from a classical PME+point-charge scheme -- PME is specific to classical force fields and has no direct analog here. Water is fully flexible (not SETTLE-constrained), consistent with testing whether each MLIP's own intramolecular water description is stable, not imposing a classical constraint the MLIP wasn't trained to expect. |
+| **Test 4 thermostat/barostat** | Nose-Hoover thermostat, Monte Carlo barostat (OpenMM) | `ase.md.nose_hoover_chain.NoseHooverChainNVT` (equilibration), `IsotropicMTKNPT` (production) | ASE has no Monte Carlo barostat implementation; MTK (Martyna-Tobias-Klein) is the standard deterministic alternative achieving the same NPT ensemble, and ASE's Nose-Hoover-chain NVT is a direct match to the paper's NVT thermostat. Toolchain substitution, not a physics choice. |
+| **Test 4 timestep** | 0.5 fs | 1.0 fs | **Compute-limited, disclosed limitation.** 2x the paper's timestep. Water O-H stretches at ~3500-3800 cm^-1 (period ~9-10 fs); 1 fs gives ~10 steps/period (borderline-minimum resolution), vs. 0.5 fs's ~20 steps/period (safer, paper's choice). Flexible (non-SETTLE-constrained) water makes this MORE of a concern here than in the paper's rigid-water setup -- a real risk of energy-conservation artifacts or instability specifically from this choice, not just a shortened run. |
+| **Test 4 NVT equilibration** | 125 ps | 125 ps | Matches. |
+| **Test 4 NPT production** | 0.125 ns (125 ps) | 50 ps | **Compute-limited, disclosed limitation.** 40% of the paper's length -- less time for RDF/structural statistics to converge; any reported RDF should be treated as lower-confidence than the paper's own. |
+| **Test 4 temperature/pressure** | 300 K, 1 bar | 300 K, 1 bar | Matches (temperature not specified by the user this session; defaulted to the paper's value as the only well-justified choice). |
+| **Both tests: `inference_settings="turbo"`** | N/A (paper uses OpenMM, not fairchem inference_settings at all) | `"turbo"` requested explicitly, with a fresh calculator per fixed-composition trajectory (never shared across differently-sized/charged systems -- see `mlip_audit/models.py::get_calc` docstring for the exact safety contract) | User-specified, with the "fixed composition" justification given explicitly. **UNTESTED on this session's local machine**: turbo requires torch.compile's C++ backend, unavailable here (no MSVC), so it was never actually exercised locally -- only "batch" mode was validated (see Test 3 Section 9). Verify turbo genuinely works (and is faster, not just different) on Colab before trusting results from it; if it silently falls back or errors, that itself needs disclosing. |
+| **eSEN checkpoint choice** | N/A (eSEN postdates the paper) | `esen-sm-conserving-all-omol`, `esen-sm-direct-all-omol` (the "sm"/small size class) | fairchem's `available_models` registry (checked against fairchem-core==2.22.0) has no `esen-md-conserving-all-omol` (only `esen-md-direct-all-omol` exists at the "md"/medium size) -- "sm" was chosen for both conserving and direct so the two are a fair, comparable pair, and to match uma-s-1p1's size class for consistency and compute budget. |
+| **eSEN reference level of theory** | N/A | Assumed wB97M-V/def2-TZVPD, same as UMA | Not independently verified against fairchem's own eSEN documentation this session (both are OMol25-generation fairchem models, presumed to share a training reference level) -- flag if this turns out wrong; it isn't used by Tests 2/4 themselves (only Test 3's `REFERENCE_LEVELS` table, unused so far), so this is a low-stakes assumption for now. |
+
+## Bugs found and fixed during local smoke-testing (before any full-scale run)
+
+Two real, non-obvious correctness bugs were caught by smoke-testing the
+resumable-MD driver (`mlip_audit/md_common.py::run_resumable_md`) at tiny
+scale (hundredths of a picosecond, seconds of wall time) with ANI-2x
+locally, before considering the Test 2/4 scripts trustworthy enough to
+hand off for real Colab runs:
+
+1. **Velocity carryover bug.** Test 4's NPT phase is meant to continue
+   directly from NVT's final (positions AND velocities) state. The
+   initial implementation redrew a fresh Maxwell-Boltzmann velocity
+   distribution at the start of the NPT phase (since, from
+   `run_resumable_md`'s point of view, `npt.traj` not existing yet looked
+   like "a fresh start," which normally SHOULD draw new velocities).
+   Caught by comparing NPT's first logged kinetic energy against NVT's
+   last -- they should match exactly and didn't. Fixed by adding a
+   `draw_initial_velocities` flag, `False` for Test 4's NPT call
+   specifically.
+2. **Off-by-one resume bug.** ASE's `Dynamics.attach(fn, interval=N)`
+   fires its callback once immediately at step 0 (before any integration)
+   in addition to every `N` steps after -- confirmed empirically (a
+   10-step run with `interval=2` produces 6 saved frames at steps
+   0,2,4,6,8,10, not 5). The initial implementation treated the on-disk
+   frame COUNT as directly proportional to completed integration steps,
+   over-counting by one checkpoint interval on every resume. Concretely:
+   requesting a 20-step trajectory that had already reached 10 steps
+   would compute only 8 remaining steps instead of the correct 10,
+   silently landing at step 18 while logging (and believing) it had
+   reached step 20. Over repeated Colab-disconnect-driven resumes (which
+   this whole design exists to handle), this would have compounded,
+   leaving every real run short of its stated target by an
+   uncontrolled, resume-count-dependent amount, without any error or
+   warning. Fixed by correctly computing completed real steps as
+   `(n_frames_on_disk - 1) * save_interval_steps`, not
+   `n_frames_on_disk * save_interval_steps`. Re-verified after the fix:
+   a resumed run now reaches its exact requested target with correctly
+   labeled timestamps and no gaps or duplicate frames.
+
+Both bugs were caught before any expensive run, specifically BECAUSE this
+project's established practice (see Test 3's whole debugging trail) is to
+smoke-test new resumable/stateful machinery at trivial scale before
+trusting it, rather than trusting new infrastructure's first real
+(expensive) invocation.
+
+## What is built vs. what still needs to happen
+
+**Built and locally smoke-tested** (tiny scale, ANI-2x, CPU, seconds of
+wall time each): `mlip_audit/molecules.py` (SMILES->3D via RDKit for Test
+2; grid-packed periodic water box for Test 4, verified against the
+paper's own box-size number), `mlip_audit/md_common.py` (resumable MD
+driver, checkpointing every N ps, both bugs above fixed and re-verified),
+`mlip_audit/md_analysis.py` (bond-length-stability tracking for Test 2;
+O-O RDF for Test 4, sanity-checked to peak near the physically-expected
+~2.8-2.9 A on a tiny test box), `mlip_audit/test2_md_stability.py` and
+`mlip_audit/test4_condensed_water.py` (CLI drivers), `mlip_audit/models.py`
+extended with eSEN-conserving/eSEN-direct and the turbo-mode contract,
+`requirements-md.txt` + `setup.sh md` (single unified environment for all
+four Test 2/4 models, since torchani and fairchem-core don't conflict the
+way mace-torch and fairchem-core do).
+
+**NOT done**:
+- No full-scale run of either test, for any model. Everything numeric in
+  this section is either a paper-reference value or this session's
+  planned/configured value, NEVER a result -- do not read anything here as
+  a finding about any model's actual stability.
+- `inference_settings="turbo"` has never actually executed successfully
+  anywhere in this project (needs a C++ compiler this local machine
+  lacks) -- its very first real exercise will be on Colab. Watch closely
+  for whether it errors, silently falls back, or behaves as documented.
+- A new Colab notebook (`notebooks/02_md_tests.ipynb`, separate from Test
+  3's `01_dimer_scan.ipynb` since these are a different stack/scope) has
+  driver cells for both tests, but neither has been executed even once,
+  on Colab or anywhere else.
+- No `--molecule`/`--model` combination has been run to full completion,
+  so there is no evidence yet that a real ~100k-step trajectory doesn't
+  hit some OTHER bug this tiny-scale smoke testing couldn't surface
+  (e.g. numerical drift only visible over many more steps, a memory leak,
+  a Colab-specific environment quirk).

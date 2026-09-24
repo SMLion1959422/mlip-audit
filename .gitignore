@@ -27,6 +27,9 @@ dist/
 # excluded.
 results/checkpoints/
 results/checkpoints_sp1/
+# Test 2/4 MD trajectories/checkpoints -- large, regenerable, and normally
+# live on Google Drive (MLIP_AUDIT_MD_ROOT) on Colab anyway, not here.
+results/md/
 data/
 .cache/
 *.pt

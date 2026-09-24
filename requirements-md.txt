@@ -1,0 +1,31 @@
+# Stack for Test 2 (MD stability) and Test 4 (condensed-phase water).
+#
+# Unlike the Test 3 split (ani-mace vs uma, forced apart by mace-torch's
+# e3nn==0.4.4 pin conflicting with fairchem-core's e3nn>=0.5), Tests 2/4
+# use torchani (ANI-2x) + fairchem-core (UMA-S, eSEN) together, and these
+# two do NOT conflict (torchani has no e3nn dependency at all) -- verified
+# by installing both into one venv this session. mace-torch is NOT part of
+# this stack (MACE-OFF23 is not one of the 4 Test 2/4 models), so the
+# conflict that forced Test 3's split never arises here.
+#
+# NOTE: torch itself is deliberately NOT pinned here -- see
+# requirements-ani-mace.txt for why (Colab ships its own CUDA-matched
+# torch; local dev installs a CPU wheel separately).
+
+# Core
+ase>=3.23
+numpy
+pandas
+matplotlib
+
+# Models
+torchani>=2.2          # ANI-2x (control model)
+fairchem-core>=2.1.0    # UMA-S, eSEN-conserving, eSEN-direct
+huggingface_hub>=0.24   # gated-checkpoint auth (uses your cached `hf auth login` token)
+
+# Molecule/geometry construction
+rdkit                   # SMILES -> 3D embedding for Test 2 molecules
+
+# Testing / notebook driver
+pytest
+jupyter
