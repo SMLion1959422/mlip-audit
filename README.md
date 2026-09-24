@@ -204,9 +204,10 @@ current status (infrastructure built + locally smoke-tested; no full-scale
 run yet). Use the `md` environment stack (see above), then:
 
 ```bash
-# Test 2: short-MD stability, 4 molecules x 4 models x 2 seeds x 100 ps.
+# Test 2: short-MD stability, the paper's real 349-atom drug-like
+# benchmark molecule x 4 models x 1 seed x 100 ps.
 python -m mlip_audit.test2_md_stability --verbose
-# subset: --molecule ethanol --model uma-s-1p1 --seed 0
+# subset: --molecule drug_like_benchmark --model uma-s-1p1 --seed 0
 
 # Test 4: condensed-phase water, 4 models x (125 ps NVT + 50 ps NPT).
 python -m mlip_audit.test4_condensed_water --verbose

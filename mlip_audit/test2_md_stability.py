@@ -2,8 +2,11 @@
 
 Protocol (session scope -- see RESULTS.md's deviations table for exactly
 how and why this differs from Ranasinghe et al. 2025 Sec. 2.2.2):
-4 small organic molecules (a subset of the paper's own SI 14-molecule
-benchmark set), 2 velocity seeds, 400 K Langevin dynamics, 1 fs timestep,
+the paper's ACTUAL 349-atom drug-like benchmark molecule (see
+mlip_audit.config.TEST2_BENCHMARK_GEOMETRY_PATH and
+scripts/build_drug_like_benchmark_geometry.py for how it was obtained and
+validated -- its exact SMILES is deposited in the paper's SI, not a
+reconstruction), 1 velocity seed, 400 K Langevin dynamics, 1 fs timestep,
 100 ps production, for each of 4 models (UMA-S, eSEN-conserving,
 eSEN-direct, ANI-2x as a non-fairchem control).
 
@@ -32,6 +35,7 @@ from ase.optimize import LBFGS
 
 from mlip_audit.config import (
     MD_ROOT,
+    TEST2_BENCHMARK_GEOMETRY_PATH,
     TEST2_CHARGE,
     TEST2_CHECKPOINT_EVERY_PS,
     TEST2_LANGEVIN_FRICTION_PER_FS,
@@ -56,9 +60,17 @@ def _geometry_cache_path(molecule_name: str) -> Path:
 
 
 def get_or_build_molecule(molecule_name: str, embed_seed: int = 0):
-    """Return the (cached) RDKit-embedded starting geometry for a Test 2
-    molecule -- built once and reused across all models/seeds, so every
-    model starts from the identical initial 3D structure."""
+    """Return the (cached) starting geometry for a Test 2 molecule --
+    resolved once and reused across all models/seeds, so every model
+    starts from the identical initial 3D structure.
+
+    If `TEST2_MOLECULES[molecule_name]` is None, the geometry comes from
+    the pre-built, validated file at `TEST2_BENCHMARK_GEOMETRY_PATH`
+    (the paper's real 349-atom molecule -- see
+    scripts/build_drug_like_benchmark_geometry.py). Otherwise it's built
+    on the fly from the given SMILES via RDKit (used for smoke-testing /
+    any smaller molecule added later).
+    """
     from ase.io import read as ase_read
     from ase.io import write as ase_write
 
@@ -66,9 +78,24 @@ def get_or_build_molecule(molecule_name: str, embed_seed: int = 0):
     if cache_path.exists():
         return ase_read(cache_path)
 
-    smiles = TEST2_MOLECULES[molecule_name]
-    atoms = build_molecule_from_smiles(smiles, seed=embed_seed)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
+    smiles = TEST2_MOLECULES[molecule_name]
+    if smiles is None:
+        if not TEST2_BENCHMARK_GEOMETRY_PATH.exists():
+            raise FileNotFoundError(
+                f"{TEST2_BENCHMARK_GEOMETRY_PATH} not found. Run "
+                "scripts/build_drug_like_benchmark_geometry.py first."
+            )
+        atoms = ase_read(TEST2_BENCHMARK_GEOMETRY_PATH)
+        atoms.center(vacuum=10.0)
+        ase_write(cache_path, atoms)
+        logger.info(
+            "Loaded %s from pre-built geometry %s -> cached at %s",
+            molecule_name, TEST2_BENCHMARK_GEOMETRY_PATH, cache_path,
+        )
+        return atoms
+
+    atoms = build_molecule_from_smiles(smiles, seed=embed_seed)
     ase_write(cache_path, atoms)
     logger.info("Built and cached %s geometry (SMILES=%s) -> %s", molecule_name, smiles, cache_path)
     return atoms
@@ -120,11 +147,11 @@ def run_one(molecule_name: str, model: str, seed: int, device: str | None = None
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--molecule", choices=list(TEST2_MOLECULES), default=None,
-                         help="Run only this molecule (default: all 4)")
+                         help="Run only this molecule (default: all, currently just the 1 benchmark molecule)")
     parser.add_argument("--model", choices=list(TEST2_MODELS), default=None,
                          help="Run only this model (default: all 4)")
     parser.add_argument("--seed", type=int, choices=list(TEST2_SEEDS), default=None,
-                         help="Run only this seed (default: both)")
+                         help="Run only this seed (default: all, currently just seed 0)")
     parser.add_argument("--device", default=None)
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()

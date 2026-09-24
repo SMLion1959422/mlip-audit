@@ -125,36 +125,66 @@ MD_ROOT.mkdir(parents=True, exist_ok=True)
 # --------------------------------------------------------------------------
 # Test 2 (short-MD molecular stability) parameters
 # --------------------------------------------------------------------------
-# Reference protocol, Ranasinghe et al. 2025 Sec. 2.2.2 (349-atom drug-like
-# benchmark molecule) and SI Sec. "Further quasi-harmonic analysis tests"
-# (14 simple benchmark systems, same simulation parameters as the main
-# 349-atom test): 400 K, Langevin friction 1 ps^-1, timestep 1.0 fs, length
-# 0.25 ns (250 ps), trajectory saved every 0.5 ps, LBFGS geometry
-# optimization before each ML MD run. See RESULTS.md's deviations table for
-# how this session's Test 2 differs and why.
+# Reference protocol, Ranasinghe et al. 2025 Sec. 2.2.2: the actual
+# 349-atom artificial drug-like benchmark molecule (Fig. 2 -- a composite
+# of clarithromycin, dexamethasone, diazepam, morphine, penicillin,
+# sildenafil, and tryptophan dipeptide fragments), 400 K, Langevin
+# friction 1 ps^-1, timestep 1.0 fs, length 0.25 ns (250 ps), trajectory
+# saved every 0.5 ps, LBFGS geometry optimization before each ML MD run.
 #
-# The 4 molecules below are a SUBSET of the paper's own SI "14 simple
-# benchmark systems" list (water, ethane, methanol, methanethiol, ethanol,
-# acetamide, tetrahydrofuran, n-hexane, cyclohexane, benzene, phenol,
-# aniline, N-acetyl-alanine-methylamide, N-acetyl-serine-methylamide) --
-# NOT the paper's main-text 349-atom molecule, which is far outside this
-# session's compute budget.
+# REVISION NOTE: an earlier round of this session substituted 4 small
+# molecules (ethanol/THF/phenol/ala-dipeptide, drawn from a DIFFERENT
+# paper test -- the SI's "14 simple benchmark systems" quasi-harmonic
+# set) for this 349-atom molecule, as a compute-budget simplification.
+# That was superseded: the paper deposits the benchmark molecule's EXACT
+# SMILES in its SI (Appendix D), extracted and validated this session
+# (RDKit parses it to exactly 349 atoms / C130H169ClFN15O31S2, matching
+# the paper's stated count and elements) -- see
+# scripts/build_drug_like_benchmark_geometry.py for the extraction,
+# validation, and 3D-embedding process, and its cached output,
+# geometries/drug_like_benchmark_349atoms.xyz. Using the real molecule is
+# strictly more defensible than a substitute when the real one is
+# available, so it replaces the small-molecule set entirely. See
+# RESULTS.md's deviations table for the full account, including this
+# supersession.
+TEST2_BENCHMARK_GEOMETRY_PATH = REPO_ROOT / "geometries" / "drug_like_benchmark_349atoms.xyz"
+
 TEST2_MOLECULES: dict[str, str] = {
-    # name -> SMILES (embedded to 3D via RDKit + MMFF94 optimization; see
-    # mlip_audit/molecules.py)
-    "ethanol": "CCO",
-    "thf": "C1CCOC1",
-    "phenol": "Oc1ccccc1",
-    "ala_dipeptide": "CC(=O)NC(C)C(=O)NC",  # N-acetyl-alanine-methylamide (Ace-Ala-Nme)
+    "drug_like_benchmark": None,  # built from TEST2_BENCHMARK_GEOMETRY_PATH, not from SMILES on the fly
 }
 
 TEST2_MODELS = ("uma-s-1p1", "esen-conserving", "esen-direct", "ani2x")
-TEST2_SEEDS = (0, 1)  # 2 seeds, per session scope (not in the paper)
+# ANI-2x element-support check (explicitly requested): the paper states
+# ANI-1ccx could NOT be used on this molecule (S, F, Cl present) -- but
+# ANI-1ccx is a different, older model, not ANI-2x. Verified directly this
+# session: torchani.models.ANI2x().symbols == ('H','C','N','O','S','F','Cl'),
+# an exact match to this molecule's element set (no missing element), and
+# an actual ANI-2x single-point energy/force evaluation on the real
+# 349-atom structure succeeded (E=-260224 eV, max|F|=2.2 eV/A, 0.26s on
+# CPU). UMA-S was also directly verified the same way (E=-260290 eV,
+# 8s on CPU/batch-mode). eSEN-conserving/eSEN-direct were NOT
+# independently tested this session (same FAIRChemCalculator
+# infrastructure as UMA-S, presumed to behave the same way for element
+# support, but this is an inference, not a direct check -- verify on
+# first real use).
+
+TEST2_SEEDS = (0,)  # ONE seed per model this round (was 2 for the small-molecule substitute)
 
 TEST2_TEMPERATURE_K = 400.0
 TEST2_LANGEVIN_FRICTION_PER_FS = 1.0 / 1000.0  # 1 ps^-1 -> fs^-1 (ASE Langevin takes 1/fs)
 TEST2_TIMESTEP_FS = 1.0
-TEST2_TOTAL_TIME_PS = 100.0  # paper: 250 ps; session compute budget: 100 ps (disclosed deviation)
+# paper: 250 ps. Session: 100 ps -- disclosed compute-budget deviation,
+# justified by the paper's own reported instability timings: of the three
+# models the paper found unstable on this exact test (MACE RXRX XXXS:
+# unstable after 10 ps; MACE RXRX XXS: unstable within 1 ps; published
+# MACE-OFF23 S: unstable after 44 ps), ALL manifested within 44 ps -- the
+# longest of the three. 100 ps gives 2.3x margin past that single
+# empirical precedent. Caveat, disclosed: that precedent is from
+# MACE-family reduced-parameter models, not from UMA/eSEN/ANI-2x (which
+# postdate the paper and were never run on this molecule before) -- it is
+# the best available evidence for how early instabilities in this class of
+# test tend to appear, not a guarantee about these specific four models.
+TEST2_TOTAL_TIME_PS = 100.0
 TEST2_CHECKPOINT_EVERY_PS = 5.0
 TEST2_TRAJ_SAVE_EVERY_PS = 0.5  # matches paper
 TEST2_CHARGE = 0

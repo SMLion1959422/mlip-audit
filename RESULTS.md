@@ -622,25 +622,32 @@ Ranasinghe et al.'s actual protocol, with justification, per instruction.
 **Test 2 (paper Sec. 2.2.2, main text)**: ONE artificial 349-atom
 drug-like benchmark molecule (a composite of clarithromycin,
 dexamethasone, diazepam, morphine, penicillin, sildenafil, and tryptophan
-dipeptide fragments) -- NOT the 4 molecules used this session. 400 K,
-Langevin (friction 1 ps^-1), 1.0 fs timestep, 0.25 ns (250 ps) production
-(MACE M/L only reached 0.174/0.041 ns in 24h -- a real data point on this
-class of test's compute cost), trajectory saved every 0.5 ps, LBFGS
-geometry optimization before each model's MD run, bond-length/bond-angle
-distributions analyzed via MDTraj + quasi-harmonic analysis.
+dipeptide fragments) -- this IS the molecule used this session (see
+revision note below). 400 K, Langevin (friction 1 ps^-1), 1.0 fs
+timestep, 0.25 ns (250 ps) production (MACE M/L only reached 0.174/0.041
+ns in 24h -- a real data point on this class of test's compute cost),
+trajectory saved every 0.5 ps, LBFGS geometry optimization before each
+model's MD run, bond-length/bond-angle distributions analyzed via MDTraj +
+quasi-harmonic analysis. Instabilities the paper actually observed on this
+exact test: MACE RXRX XXXS after 10 ps, MACE RXRX XXS within 1 ps,
+published MACE-OFF23 S after 44 ps -- all three MACE-family
+reduced-parameter variants, none of this session's four models.
 
-**Test 2's molecules, actually a different paper test**: the paper
-separately describes (SI, "Further quasi-harmonic analysis tests") a set
+**REVISION NOTE**: an earlier round of this session substituted 4 small
+molecules (ethanol, THF, phenol, ala-dipeptide) for this 349-atom
+molecule, reasoning it was a validated cheaper alternative drawn from a
+DIFFERENT paper test (SI, "Further quasi-harmonic analysis tests," a set
 of "14 simple benchmark systems... water, ethane, methanol, methanethiol,
 ethanol, acetamide, tetrahydrofuran, n-hexane, cyclohexane, benzene,
 phenol, aniline, N-acetyl-alanine-methylamide, and
-N-acetyl-serine-methylamide," run at the SAME simulation parameters (400 K
-/ Langevin 1 ps^-1 / 1.0 fs / 0.25 ns) as the main 349-atom test. This
-session's 4 molecules (ethanol, THF, phenol, ala-dipeptide) are a subset
-of THIS 14-molecule list, not of the 349-atom test -- worth being precise
-about, since these are two different tests in the paper with the same
-simulation parameters but different molecules and different purposes
-(main stability test vs. quasi-harmonic frequency analysis).
+N-acetyl-serine-methylamide," run at the same simulation parameters as the
+main 349-atom test but testing different physics/purpose --
+quasi-harmonic frequency analysis, not the main stability screen). That
+substitution is **superseded**: the paper deposits the 349-atom
+molecule's exact SMILES in its SI (Appendix D), found and verified this
+session -- see the next section. Using the real molecule is strictly more
+defensible than a substitute when the real one is available and buildable
+from a verified source, so it replaces the small-molecule set entirely.
 
 **Test 4 (paper Sec. 2.3)**: 168 TIP3P water molecules PLUS a SOLUTE,
 prepared classically (MM, 0.5 ns equilibration to a 1.706 nm box), PME
@@ -650,13 +657,58 @@ equilibration, then 0.125 ns (125 ps) NPT production, 300 K (Nose-Hoover
 thermostat), 1 bar (Monte Carlo barostat), 0.5 fs timestep, trajectory
 saved every 0.5 ps, RDFs via MDTraj.
 
+## Test 2 molecule: SMILES provenance and verification
+
+The paper's SI (Appendix D, "SMILES of drug-like benchmark molecule")
+deposits the exact SMILES string. Extracted from the fetched SI PDF text
+via TWO independent extraction methods (`pdftotext -layout` and plain
+`pdftotext`), which agreed character-for-character. Validated (see
+`scripts/build_drug_like_benchmark_geometry.py`, which raises rather than
+silently proceeding if any check below fails):
+
+| Check | Expected (paper) | Got (RDKit on extracted SMILES) | Match |
+|---|---|---|---|
+| Total atom count (incl. H) | 349 (Fig. 2 caption) | 349 | YES |
+| Elements present | H, C, N, O, S, F, Cl (paper: "presence of S, F, and Cl atoms") | H, C, N, O, S, F, Cl | YES |
+| Molecular formula | not stated in the paper | C130H169ClFN15O31S2 | (informational) |
+
+An exact 349-atom match from an ~500-character SMILES string, extracted
+across several PDF line-wraps, would be an unlikely coincidence if even
+one character had been mis-transcribed -- treated as strong evidence the
+extraction is correct, not proof. 3D embedding: RDKit ETKDG (seed=0) +
+MMFF94 optimization (the paper used GAFF2 via a different toolchain for
+its own starting geometry; both are generic force fields intended only to
+produce a reasonable starting conformer -- this session's LBFGS
+pre-optimization step, under each model's own PES, is what the protocol
+actually relies on for a meaningful starting structure, matching the
+paper's own "before each ML simulation, the geometry ... was optimized
+using the L-BFGS minimizer"). Saved to
+`geometries/drug_like_benchmark_349atoms.xyz`.
+
+**ANI-2x element-support check (explicitly requested, done before
+assuming it, not after)**: the paper states ANI-1ccx specifically could
+not be used on this molecule ("Because of the presence of S, F, and Cl
+atoms in the benchmark molecule, the ANI-1ccx could not be employed") --
+but ANI-1ccx is a different, older model from ANI-2x (both are in the
+paper's own model list, and only ANI-1ccx is singled out as excluded,
+implying ANI-2x was used successfully). Verified directly rather than
+relying on that inference: `torchani.models.ANI2x().symbols ==
+('H','C','N','O','S','F','Cl')` -- an exact match to this molecule's
+element set, no gaps. Then actually ran it: ANI-2x single-point on the
+real embedded 349-atom structure succeeded (E=-260224 eV, max\|F\|=2.2
+eV/A, 0.26s on local CPU). UMA-S was checked the same way and also
+succeeded (E=-260290 eV, 8s on local CPU/batch-mode). eSEN-conserving/
+eSEN-direct were NOT independently tested this session -- same
+FAIRChemCalculator infrastructure as UMA-S is presumed (not verified) to
+behave the same way for element support.
+
 ## Deviations table
 
 | Parameter | Ranasinghe et al. | This session | Justification |
 |---|---|---|---|
-| **Test 2 molecule(s)** | ONE 349-atom composite drug-like molecule (main test); separately, 14 simple molecules incl. ethanol/THF/phenol/ala-dipeptide (SI quasi-harmonic test, same sim. params) | 4 molecules: ethanol, THF, phenol, ala-dipeptide (subset of the paper's OWN 14-molecule SI list) | Compute budget: the 349-atom test is far outside a 177-CU Colab budget across 4 models x 2 seeds; the paper's own SI subset is a validated, much cheaper alternative testing the same physics (bond/angle stability) on real, if smaller, molecules the paper itself used. |
-| **Test 2 seeds** | not specified (presumably 1 run per model) | 2 seeds per (molecule, model) | Session choice, to distinguish a genuine model instability from a single unlucky velocity draw. Not a paper value to deviate from -- new. |
-| **Test 2 length** | 0.25 ns (250 ps) | 100 ps | **Compute-limited, disclosed limitation** (explicit instruction: not to be silently adopted). 40% of the paper's length; some instabilities the paper reports only emerging late in a 250 ps run could be missed here. |
+| **Test 2 molecule(s)** | ONE 349-atom composite drug-like molecule | The same molecule, reconstructed from the paper's own deposited SMILES (see above) | None needed -- this now matches. (Earlier round used a 4-small-molecule substitute; superseded, see revision note above.) |
+| **Test 2 seeds** | not specified (presumably 1 run per model) | 1 seed per model | Matches the paper's implicit 1-run-per-model design; the earlier round's 2-seed choice (for the small-molecule substitute) is superseded along with that substitute. |
+| **Test 2 length** | 0.25 ns (250 ps) | 100 ps | **Compute-limited, disclosed limitation** (explicit instruction: not to be silently adopted). 40% of the paper's length. Justified against the paper's OWN reported instability timings on this exact test: the three models it found unstable (MACE RXRX XXXS: 10 ps; MACE RXRX XXS: 1 ps; published MACE-OFF23 S: 44 ps) all manifested within 44 ps, the longest of the three -- 100 ps gives 2.3x margin past that precedent. Caveat: that precedent is from MACE-family reduced-parameter models, not from UMA/eSEN/ANI-2x, which postdate the paper and have never been run on this molecule before -- it's the best available evidence for how early instabilities in this class of test tend to appear, not a guarantee about these specific four models. An instability that only manifests after 100 ps would be missed. |
 | **Test 2 timestep** | 1.0 fs | 1.0 fs | Matches. |
 | **Test 2 temperature / thermostat** | 400 K, Langevin, friction 1 ps^-1 | 400 K, Langevin, friction 1 ps^-1 | Matches. |
 | **Test 2 models** | ANI-2x, MACE-OFF23 (S/M/L/XS variants), B97-3c-family in-house models -- NOT UMA/eSEN (postdate the paper) | UMA-S, eSEN-conserving, eSEN-direct, ANI-2x (control) | Project scope from the start of this session: auditing OMol25-generation models (UMA, eSEN), which did not exist when the paper was written. ANI-2x included as a non-fairchem control, matching its role throughout this project. |
@@ -731,6 +783,17 @@ extended with eSEN-conserving/eSEN-direct and the turbo-mode contract,
 `requirements-md.txt` + `setup.sh md` (single unified environment for all
 four Test 2/4 models, since torchani and fairchem-core don't conflict the
 way mace-torch and fairchem-core do).
+
+**Test 2's real molecule specifically**: `scripts/build_drug_like_benchmark_geometry.py`
+extracts, validates (atom count/elements/formula, all matched), and 3D-embeds
+the paper's actual 349-atom molecule from its deposited SMILES (see "Test 2
+molecule: SMILES provenance and verification" above) -- run once, producing
+`geometries/drug_like_benchmark_349atoms.xyz`. The full `run_one()` production
+code path (load cached geometry -> LBFGS pre-optimize under the model's own
+PES -> resumable Langevin MD) was smoke-tested end to end on this REAL
+349-atom structure with ANI-2x (10 steps, ~18s wall time including model
+load) -- not just on a small placeholder molecule -- and produced physically
+sensible, roughly energy-conserving output.
 
 **NOT done**:
 - No full-scale run of either test, for any model. Everything numeric in
