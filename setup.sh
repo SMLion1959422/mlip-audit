@@ -85,7 +85,7 @@ if [[ "$STACK" == "uma" ]]; then
     echo "  python -m pytest tests/test_charge_spin.py -v"
     echo "  python -m mlip_audit.test3_dimer --model uma-s-1p1"
 elif [[ "$STACK" == "md" ]]; then
-    echo "  python -m mlip_audit.test2_md_stability --molecule ethanol --model ani2x --seed 0"
+    echo "  python -m mlip_audit.test2_md_stability --molecule drug_like_benchmark --model ani2x --seed 0"
     echo "  python -m mlip_audit.test4_condensed_water --model ani2x --phase nvt"
 else
     echo "  python -m mlip_audit.test3_dimer --model mace-off23-small"
