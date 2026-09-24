@@ -5,6 +5,15 @@ file is about STATE and NEXT STEPS; `RESULTS.md` is about the actual
 numbers/findings. Don't duplicate content between them -- update both if
 something changes.
 
+**This repo is now pushed to a private GitHub repo**:
+https://github.com/SMLion1959422/mlip-audit (`origin`/`master`, pushed
+this session via the local machine's already-authenticated `gh` CLI).
+`notebooks/02_md_tests.ipynb`'s clone cell pulls from there using a
+short-lived, read-only, repo-scoped GitHub PAT entered via `getpass` in
+Colab -- see that cell's markdown for the exact token-creation steps.
+Colab never gets write access and never pushes back to GitHub (Test 2/4
+output goes to Google Drive only).
+
 ## Where things stand right now
 
 - **Tests 2 & 4 (MD stability, condensed-phase water): infrastructure
@@ -125,10 +134,15 @@ Windows-specific memory bug it works around.
 
 1. **Run Tests 2 & 4 at full scale on Colab** -- this is the actual
    remaining deliverable. `notebooks/02_md_tests.ipynb` is the driver;
-   both tests are resumable/checkpointed to Google Drive. Test 2 is now 1
-   molecule (the real 349-atom benchmark) x 4 models x 1 seed x 100 ps;
-   Test 4 is 168 waters x 4 models x (125 ps NVT + 50 ps NPT). Read
-   `RESULTS.md`'s "Test 2 and Test 4" section (deviations table +
+   both tests are resumable/checkpointed to Google Drive. **Run section
+   4a (dress rehearsal: interrupt/resume seam check, UMA-S only, small
+   scale) before section 4b (the real sweep)** -- it was added this
+   session specifically to validate the checkpoint/resume mechanism
+   cheaply before trusting it with the full compute-unit budget; don't
+   skip it on a fresh Colab session. Test 2 is now 1 molecule (the real
+   349-atom benchmark) x 4 models x 1 seed x 100 ps; Test 4 is 168 waters
+   x 4 models x (125 ps NVT + 50 ps NPT). Read `RESULTS.md`'s "Test 2 and
+   Test 4" section (deviations table +
    provenance/verification sections) before running. Record results in
    `RESULTS.md`'s Test 2/4 section by hand once a run completes, same as
    every other result in this project.
