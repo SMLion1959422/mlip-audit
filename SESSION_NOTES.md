@@ -135,11 +135,23 @@ Windows-specific memory bug it works around.
 1. **Run Tests 2 & 4 at full scale on Colab** -- this is the actual
    remaining deliverable. `notebooks/02_md_tests.ipynb` is the driver;
    both tests are resumable/checkpointed to Google Drive. **Run section
-   4a (dress rehearsal: interrupt/resume seam check, UMA-S only, small
-   scale) before section 4b (the real sweep)** -- it was added this
-   session specifically to validate the checkpoint/resume mechanism
-   cheaply before trusting it with the full compute-unit budget; don't
-   skip it on a fresh Colab session. Test 2 is now 1 molecule (the real
+   4a (dress rehearsal: interrupt/resume seam check, UMA-S only, 2 ps),
+   THEN section 4b (equilibration diagnostic: UMA-S, 20 ps at production
+   settings), BEFORE section 4c (the real 4-model sweep)** -- 4a validates
+   the checkpoint/resume mechanism cheaply; 4b exists because 4a's 2 ps
+   rehearsal showed T dropping to ~200 K then climbing with E_tot rising
+   monotonically -- looks like ordinary post-minimization equilibration,
+   but NOT YET CONFIRMED on a long-enough window (needs Colab GPU: a
+   single UMA-S eval on this molecule benchmarked at ~7.5s on local CPU,
+   so 20,000 steps locally would take ~42h -- don't try to run 4b here).
+   4b's printed report determines whether Test 2 needs its own explicit
+   equilibration/burn-in exclusion before the bond-stability statistics in
+   `mlip_audit/md_analysis.py::bond_length_trajectory_report` can be
+   trusted (see `SKIP_N_FRAMES` in the notebook's bond-stats cell, and
+   RESULTS.md's "Equilibration diagnostic" section). Don't skip 4a or 4b
+   on a fresh Colab session, and don't assume the equilibration
+   explanation is right until 4b has actually been run. Test 2 is now 1
+   molecule (the real
    349-atom benchmark) x 4 models x 1 seed x 100 ps; Test 4 is 168 waters
    x 4 models x (125 ps NVT + 50 ps NPT). Read `RESULTS.md`'s "Test 2 and
    Test 4" section (deviations table +

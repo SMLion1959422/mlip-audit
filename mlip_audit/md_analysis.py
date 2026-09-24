@@ -37,15 +37,36 @@ def infer_bonds(positions: np.ndarray, symbols: list[str]) -> list[tuple[int, in
     return bonds
 
 
-def bond_length_trajectory_report(traj_path: Path) -> dict:
+def bond_length_trajectory_report(traj_path: Path, skip_first_n_frames: int = 1) -> dict:
     """Track every bond (inferred from the first frame) across the whole
     trajectory. Returns a dict with per-bond min/max/mean length and a
     list of bonds that ever exceeded BOND_BREAK_RATIO x their initial
     length (candidate instabilities).
 
+    Args:
+        traj_path: the .traj file to analyze.
+        skip_first_n_frames: number of leading frames excluded from the
+            reported min/max/mean/max_ratio statistics (the d0 REFERENCE
+            distance always comes from frame 0 regardless of this value --
+            only the statistics computed across the trajectory are
+            affected). Defaults to 1, excluding frame 0 itself: per
+            mlip_audit.md_common.run_resumable_md's checkpointing (ASE's
+            dyn.attach fires once at step 0), frame 0 is the
+            post-LBFGS-minimization structure with freshly-drawn initial
+            velocities but ZERO elapsed MD time -- not a thermally sampled
+            configuration, and including it in "production" bond
+            statistics would be analyzing a point that isn't production
+            data. If a real equilibration transient beyond frame 0 is
+            confirmed (see the Test 2 equilibration diagnostic in
+            notebooks/02_md_tests.ipynb / RESULTS.md), pass a larger value
+            to also exclude that burn-in window -- not done by default
+            here, since the burn-in length is an empirical question, not
+            something to assume.
+
     Returns:
         {
-          "n_frames": int,
+          "n_frames": int,            # total frames on disk
+          "n_frames_analyzed": int,   # frames actually used for the stats below
           "bonds": [{"i": int, "j": int, "symbols": (s_i, s_j),
                      "d0": float, "d_min": float, "d_max": float,
                      "d_mean": float, "max_ratio": float,
@@ -56,12 +77,18 @@ def bond_length_trajectory_report(traj_path: Path) -> dict:
     with Trajectory(str(traj_path), "r") as traj:
         frames = list(traj)
     if not frames:
-        return {"n_frames": 0, "bonds": [], "any_unstable": False}
+        return {"n_frames": 0, "n_frames_analyzed": 0, "bonds": [], "any_unstable": False}
 
     symbols = frames[0].get_chemical_symbols()
     bonds0 = infer_bonds(frames[0].get_positions(), symbols)
 
-    all_positions = np.array([f.get_positions() for f in frames])  # (n_frames, n_atoms, 3)
+    analyzed_frames = frames[skip_first_n_frames:]
+    if not analyzed_frames:
+        raise ValueError(
+            f"skip_first_n_frames={skip_first_n_frames} >= n_frames={len(frames)} "
+            f"for {traj_path} -- nothing left to analyze."
+        )
+    all_positions = np.array([f.get_positions() for f in analyzed_frames])  # (n_analyzed, n_atoms, 3)
 
     report_bonds = []
     any_unstable = False
@@ -77,7 +104,12 @@ def bond_length_trajectory_report(traj_path: Path) -> dict:
             "flagged_unstable": flagged,
         })
 
-    return {"n_frames": len(frames), "bonds": report_bonds, "any_unstable": any_unstable}
+    return {
+        "n_frames": len(frames),
+        "n_frames_analyzed": len(analyzed_frames),
+        "bonds": report_bonds,
+        "any_unstable": any_unstable,
+    }
 
 
 def oo_radial_distribution_function(

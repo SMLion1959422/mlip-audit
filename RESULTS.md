@@ -723,6 +723,7 @@ behave the same way for element support.
 | **Both tests: `inference_settings="turbo"`** | N/A (paper uses OpenMM, not fairchem inference_settings at all) | `"turbo"` requested explicitly, with a fresh calculator per fixed-composition trajectory (never shared across differently-sized/charged systems -- see `mlip_audit/models.py::get_calc` docstring for the exact safety contract) | User-specified, with the "fixed composition" justification given explicitly. **UNTESTED on this session's local machine**: turbo requires torch.compile's C++ backend, unavailable here (no MSVC), so it was never actually exercised locally -- only "batch" mode was validated (see Test 3 Section 9). Verify turbo genuinely works (and is faster, not just different) on Colab before trusting results from it; if it silently falls back or errors, that itself needs disclosing. |
 | **eSEN checkpoint choice** | N/A (eSEN postdates the paper) | `esen-sm-conserving-all-omol`, `esen-sm-direct-all-omol` (the "sm"/small size class) | fairchem's `available_models` registry (checked against fairchem-core==2.22.0) has no `esen-md-conserving-all-omol` (only `esen-md-direct-all-omol` exists at the "md"/medium size) -- "sm" was chosen for both conserving and direct so the two are a fair, comparable pair, and to match uma-s-1p1's size class for consistency and compute budget. |
 | **eSEN reference level of theory** | N/A | Assumed wB97M-V/def2-TZVPD, same as UMA | Not independently verified against fairchem's own eSEN documentation this session (both are OMol25-generation fairchem models, presumed to share a training reference level) -- flag if this turns out wrong; it isn't used by Tests 2/4 themselves (only Test 3's `REFERENCE_LEVELS` table, unused so far), so this is a low-stakes assumption for now. |
+| **Test 2 production/analysis window** | Not stated explicitly for Test 2 (Test 4's water box IS given a separate 125 ps equilibration phase excluded from analysis) | **PENDING**: `bond_length_trajectory_report` excludes only frame 0 (the pre-dynamics, post-minimization state) by default so far | See "Equilibration diagnostic" above -- a 20 ps UMA-S diagnostic run is needed (not yet executed, requires Colab GPU) to determine whether Test 2 needs its own explicit equilibration phase, analogous to Test 4's, before any bond-stability statistic can be trusted. Do not treat the current frame-0-only exclusion as sufficient until that diagnostic's result is read. |
 
 ## Bugs found and fixed during local smoke-testing (before any full-scale run)
 
@@ -767,6 +768,65 @@ project's established practice (see Test 3's whole debugging trail) is to
 smoke-test new resumable/stateful machinery at trivial scale before
 trusting it, rather than trusting new infrastructure's first real
 (expensive) invocation.
+
+## Equilibration diagnostic (before trusting Test 2's bond statistics)
+
+**Trigger**: the 2 ps interrupt/resume rehearsal (UMA-S, notebook section
+4a) showed temperature dropping from the ~400 K initial Maxwell-Boltzmann
+draw to ~200 K, then climbing (209 -> 253 K over 2 ps), with E_tot rising
+monotonically +4.4 eV with no fluctuation. This is the textbook signature
+of post-minimization equilibration -- the initial velocity draw splits
+kinetic energy roughly 50/50 with potential energy as the LBFGS-minimized
+structure begins moving under the thermostat, so the instantaneous
+"temperature" (purely kinetic) reads well below the target immediately
+after the draw, then the Langevin thermostat reheats the system toward
+400 K -- but per this project's standing practice, that must be confirmed
+on a longer window, not assumed from 2 ps.
+
+**Diagnostic added**: notebook section 4b (`notebooks/02_md_tests.ipynb`)
+runs UMA-S for 20 ps at full production settings (400 K, friction
+1 ps^-1, 1 fs timestep, 0.5 ps save interval, real charge/spin) -- NOT a
+separate throwaway run, but literally the first 20 ps of UMA-S's actual
+Test 2 trajectory, written to the real production path, so section 4c's
+full sweep can resume it to 100 ps with nothing wasted. It plots
+temperature and E_tot vs. time, and mechanically reports: (1) the first
+time point after which a rolling (2 ps window) mean of T stays within
++/-20 K of 400 K for the rest of the run, or an explicit "not reached"
+if it never does; (2) the E_tot linear-fit slope in the first vs. second
+half of the run, to check whether the rise seen at 2 ps has flattened;
+(3) the configured Langevin friction against the paper's stated value.
+
+**Status: NOT YET RUN.** A single UMA-S energy+force call on this
+349-atom molecule was benchmarked locally at ~7.5 s (CPU,
+`inference_settings="batch"`, no C++ compiler available for turbo/compile
+mode) -- 20,000 MD steps at that rate would take on the order of 42
+hours, so this diagnostic was not run on this machine. It requires the
+Colab GPU session Test 2/4 already depend on; GPU throughput for UMA-S on
+this molecule has not been benchmarked anywhere in this project yet.
+**Do not treat the "post-minimization equilibration" explanation above as
+confirmed until this cell has actually been run and its printed report
+read** -- it is the leading hypothesis given the 2 ps signature, not a
+verified finding.
+
+**Frame-0 inclusion in bond statistics -- confirmed bug, fixed.** Checked
+directly by code inspection (no run needed for this part): per
+`mlip_audit/md_common.py::run_resumable_md`'s checkpointing (ASE's
+`dyn.attach` fires once at step 0), frame 0 of every Test 2 trajectory is
+the post-LBFGS-minimization structure with freshly-drawn initial
+velocities but ZERO elapsed MD time -- not a thermally sampled
+configuration. `mlip_audit/md_analysis.py::bond_length_trajectory_report`
+was including it in the reported min/max/mean/max_ratio statistics
+alongside every real MD frame. Fixed: the function now takes a
+`skip_first_n_frames` parameter (default 1, excluding frame 0; the d0
+REFERENCE distance still always comes from frame 0, only the statistics
+computed across the trajectory are affected) and returns both `n_frames`
+(total on disk) and `n_frames_analyzed`, so the exclusion is visible in
+the notebook's printed output rather than silent. The notebook's bond-stats
+cell (section 4c analysis) exposes this as `SKIP_N_FRAMES`, with an
+explicit comment to raise it once the 20 ps diagnostic above reports a
+real plateau time longer than one checkpoint interval -- not done
+pre-emptively, since the correct burn-in length is an empirical question
+this diagnostic is meant to answer, not something to assume in advance.
 
 ## What is built vs. what still needs to happen
 
